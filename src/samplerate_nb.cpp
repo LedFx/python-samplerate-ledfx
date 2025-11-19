@@ -48,9 +48,9 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-// Type aliases for nanobind arrays
-using nb_array_f32 = nb::ndarray<nb::numpy, float, nb::c_contig>;
-using callback_t = std::function<nb_array_f32(void)>;
+// Type aliases for nanobind arrays  
+using nb_array_f32 = nb::ndarray<nb::numpy, float>;
+using callback_t = std::function<nb::object(void)>;
 
 namespace samplerate {
 
@@ -440,7 +440,15 @@ class CallbackResampler {
   void clear_callback_error() { _callback_error_msg = ""; }
 
   nb_array_f32 callback(void) {
-    auto input = _callback();
+    auto input_obj = _callback();
+    
+    // Convert object to ndarray
+    if (input_obj.is_none()) {
+      // Return empty array for None
+      return nb_array_f32();
+    }
+    
+    auto input = nb::cast<nb_array_f32>(input_obj);
 
     if (input.ndim() > 0 && _buffer_ndim == 0)
       _buffer_ndim = input.ndim();
@@ -531,8 +539,9 @@ class CallbackResampler {
 
   CallbackResampler clone() const { return CallbackResampler(*this); }
   CallbackResampler &__enter__() { return *this; }
-  void __exit__(const nb::object &/*exc_type*/, const nb::object &/*exc*/,
-                const nb::object &/*exc_tb*/) {
+  void __exit__(const nb::object &exc_type = nb::none(), 
+                const nb::object &exc = nb::none(),
+                const nb::object &exc_tb = nb::none()) {
     _destroy();
   }
 };
@@ -545,6 +554,7 @@ long the_callback_func(void *cb_data, float **data) {
 
   size_t ndim = 0;
   size_t num_frames = 0;
+  size_t num_channels = 1;
   float* data_ptr = nullptr;
   
   {
@@ -558,20 +568,19 @@ long the_callback_func(void *cb_data, float **data) {
     if (ndim == 0) return 0;
     
     num_frames = input.shape(0);
+    if (ndim == 2) {
+      num_channels = input.shape(1);
+    } else if (ndim > 2) {
+      // Cannot throw exception in C callback - store error and return 0
+      cb->set_callback_error("Input array should have at most 2 dimensions");
+      return 0;
+    }
+    
     data_ptr = const_cast<float*>(input.data());
   }
 
-  // set the number of channels
-  int channels = 1;
-  if (ndim == 2) {
-    channels = cb->get_buffer().shape(1);
-  } else if (ndim > 2) {
-    // Cannot throw exception in C callback - store error and return 0
-    cb->set_callback_error("Input array should have at most 2 dimensions");
-    return 0;
-  }
-
-  if (channels != cb_channels || channels == 0) {
+  // Check channel count
+  if ((int)num_channels != cb_channels || num_channels == 0) {
     // Cannot throw exception in C callback - store error and return 0
     cb->set_callback_error("Invalid number of channels in input data.");
     return 0;
@@ -762,7 +771,10 @@ NB_MODULE(samplerate, m) {
            "Create a copy of the resampler object.")
       .def("__enter__", &sr::CallbackResampler::__enter__,
            nb::rv_policy::reference_internal)
-      .def("__exit__", &sr::CallbackResampler::__exit__)
+      .def("__exit__", 
+           [](sr::CallbackResampler &self, nb::args args, nb::kwargs kwargs) {
+             self.__exit__(nb::none(), nb::none(), nb::none());
+           })
       .def_rw(
           "ratio", &sr::CallbackResampler::_ratio,
           "Conversion ratio = output sample rate / input sample rate.")

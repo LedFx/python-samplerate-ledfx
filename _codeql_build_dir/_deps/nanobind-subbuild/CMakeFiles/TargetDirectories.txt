@@ -1,0 +1,3 @@
+/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/nanobind-subbuild/CMakeFiles/nanobind-populate.dir
+/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/nanobind-subbuild/CMakeFiles/edit_cache.dir
+/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/nanobind-subbuild/CMakeFiles/rebuild_cache.dir

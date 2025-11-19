@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/CMakeFiles/libsamplerate-populate"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/CMakeFiles/libsamplerate-populate.rule"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/CMakeFiles/libsamplerate-populate-complete.rule"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/libsamplerate-populate-prefix/src/libsamplerate-populate-stamp/libsamplerate-populate-build.rule"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/libsamplerate-populate-prefix/src/libsamplerate-populate-stamp/libsamplerate-populate-configure.rule"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/libsamplerate-populate-prefix/src/libsamplerate-populate-stamp/libsamplerate-populate-download.rule"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/libsamplerate-populate-prefix/src/libsamplerate-populate-stamp/libsamplerate-populate-install.rule"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/libsamplerate-populate-prefix/src/libsamplerate-populate-stamp/libsamplerate-populate-mkdir.rule"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/libsamplerate-populate-prefix/src/libsamplerate-populate-stamp/libsamplerate-populate-patch.rule"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/libsamplerate-populate-prefix/src/libsamplerate-populate-stamp/libsamplerate-populate-test.rule"
+		},
+		{
+			"file" : "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-subbuild/libsamplerate-populate-prefix/src/libsamplerate-populate-stamp/libsamplerate-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"libsamplerate-populate"
+		],
+		"name" : "libsamplerate-populate"
+	}
+}
