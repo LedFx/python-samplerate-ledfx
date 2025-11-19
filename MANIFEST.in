@@ -1,8 +1,7 @@
 include README.rst
 include LICENSE.rst
-include versioneer.py
 include src/*.cpp
 include CMakeLists.txt
 include external/CMakeLists.txt
-include requirements.txt
+include uv.lock
 include examples/*.py
