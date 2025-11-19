@@ -355,6 +355,235 @@ class Resampler {
   Resampler clone() const { return Resampler(*this); }
 };
 
+namespace {
+
+long the_callback_func(void *cb_data, float **data);
+
+}  // namespace
+
+class CallbackResampler {
+ private:
+  SRC_STATE *_state = nullptr;
+  callback_t _callback = nullptr;
+  nb_array_f32 _current_buffer;
+  size_t _buffer_ndim = 0;
+  std::string _callback_error_msg = "";
+
+ public:
+  double _ratio = 0.0;
+  int _converter_type = 0;
+  size_t _channels = 0;
+
+ private:
+  void _create() {
+    int _err_num = 0;
+    _state = src_callback_new(the_callback_func, _converter_type, (int)_channels,
+                              &_err_num, static_cast<void *>(this));
+    if (_state == nullptr) error_handler(_err_num);
+  }
+
+  void _destroy() {
+    if (_state != nullptr) {
+      src_delete(_state);
+      _state = nullptr;
+    }
+  }
+
+ public:
+  CallbackResampler(const callback_t &callback_func, double ratio,
+                    const nb::object &converter_type, size_t channels)
+      : _callback(callback_func),
+        _ratio(ratio),
+        _converter_type(get_converter_type(converter_type)),
+        _channels(channels) {
+    _create();
+  }
+
+  // copy constructor
+  CallbackResampler(const CallbackResampler &r)
+      : _callback(r._callback),
+        _ratio(r._ratio),
+        _converter_type(r._converter_type),
+        _channels(r._channels) {
+    int _err_num = 0;
+    _state = src_clone(r._state, &_err_num);
+    if (_state == nullptr) error_handler(_err_num);
+  }
+
+  // move constructor
+  CallbackResampler(CallbackResampler &&r)
+      : _state(r._state),
+        _callback(r._callback),
+        _current_buffer(std::move(r._current_buffer)),
+        _buffer_ndim(r._buffer_ndim),
+        _callback_error_msg(std::move(r._callback_error_msg)),
+        _ratio(r._ratio),
+        _converter_type(r._converter_type),
+        _channels(r._channels) {
+    r._state = nullptr;
+    r._callback = nullptr;
+    r._buffer_ndim = 0;
+    r._ratio = 0.0;
+    r._converter_type = 0;
+    r._channels = 0;
+  }
+
+  ~CallbackResampler() { _destroy(); }
+
+  void set_buffer(const nb_array_f32 &new_buf) { _current_buffer = new_buf; }
+  nb_array_f32 get_buffer() const { return _current_buffer; }
+  size_t get_channels() { return _channels; }
+  void set_callback_error(const std::string &error_msg) {
+    _callback_error_msg = error_msg;
+  }
+  std::string get_callback_error() const { return _callback_error_msg; }
+  void clear_callback_error() { _callback_error_msg = ""; }
+
+  nb_array_f32 callback(void) {
+    auto input = _callback();
+
+    if (input.ndim() > 0 && _buffer_ndim == 0)
+      _buffer_ndim = input.ndim();
+
+    _current_buffer = input;
+    return input;
+  }
+
+  nb::ndarray<nb::numpy, float> read(size_t frames) {
+    // Allocate output array
+    size_t total_elements = frames * _channels;
+    float* output_data = new float[total_elements];
+    
+    // Create capsule for memory management
+    nb::capsule owner(output_data, [](void* p) noexcept {
+      delete[] static_cast<float*>(p);
+    });
+
+    if (_state == nullptr) _create();
+
+    // clear any previous callback error
+    clear_callback_error();
+
+    // read from the callback - note: GIL is managed by the_callback_func
+    // which acquires it only when calling the Python callback
+    size_t output_frames_gen = 0;
+    int err_code = 0;
+    {
+      nb::gil_scoped_release release;
+      output_frames_gen = src_callback_read(_state, _ratio, (long)frames,
+                                            output_data);
+      // Get error code while GIL is released
+      if (output_frames_gen == 0) {
+        err_code = src_error(_state);
+      }
+    }
+
+    // check if callback had an error
+    std::string callback_error = get_callback_error();
+    if (!callback_error.empty()) {
+      throw std::domain_error(callback_error);
+    }
+
+    // check error status
+    if (output_frames_gen == 0) {
+      error_handler(err_code);
+    }
+
+    // Create output ndarray with proper shape and stride
+    size_t output_shape[2];
+    int64_t output_stride[2];
+    
+    // if there is only one channel and the input array had only on dimension
+    // we also output a 1D array
+    if (_channels == 1 && _buffer_ndim == 1) {
+      output_shape[0] = output_frames_gen;
+      output_stride[0] = sizeof(float);
+      
+      return nb::ndarray<nb::numpy, float>(
+          output_data,
+          1,
+          output_shape,
+          owner,
+          output_stride
+      );
+    } else {
+      output_shape[0] = output_frames_gen;
+      output_shape[1] = _channels;
+      output_stride[0] = _channels * sizeof(float);
+      output_stride[1] = sizeof(float);
+      
+      return nb::ndarray<nb::numpy, float>(
+          output_data,
+          2,
+          output_shape,
+          owner,
+          output_stride
+      );
+    }
+  }
+
+  void set_starting_ratio(double new_ratio) {
+    error_handler(src_set_ratio(_state, new_ratio));
+    _ratio = new_ratio;
+  }
+
+  void reset() { error_handler(src_reset(_state)); }
+
+  CallbackResampler clone() const { return CallbackResampler(*this); }
+  CallbackResampler &__enter__() { return *this; }
+  void __exit__(const nb::object &/*exc_type*/, const nb::object &/*exc*/,
+                const nb::object &/*exc_tb*/) {
+    _destroy();
+  }
+};
+
+namespace {
+
+long the_callback_func(void *cb_data, float **data) {
+  CallbackResampler *cb = static_cast<CallbackResampler *>(cb_data);
+  int cb_channels = cb->get_channels();
+
+  size_t ndim = 0;
+  size_t num_frames = 0;
+  float* data_ptr = nullptr;
+  
+  {
+    nb::gil_scoped_acquire acquire;
+
+    // get the data as a numpy array
+    auto input = cb->callback();
+    ndim = input.ndim();
+    
+    // end of stream is signaled by a None, which is cast to a ndarray with ndim == 0
+    if (ndim == 0) return 0;
+    
+    num_frames = input.shape(0);
+    data_ptr = const_cast<float*>(input.data());
+  }
+
+  // set the number of channels
+  int channels = 1;
+  if (ndim == 2) {
+    channels = cb->get_buffer().shape(1);
+  } else if (ndim > 2) {
+    // Cannot throw exception in C callback - store error and return 0
+    cb->set_callback_error("Input array should have at most 2 dimensions");
+    return 0;
+  }
+
+  if (channels != cb_channels || channels == 0) {
+    // Cannot throw exception in C callback - store error and return 0
+    cb->set_callback_error("Invalid number of channels in input data.");
+    return 0;
+  }
+
+  *data = data_ptr;
+
+  return (long)num_frames;
+}
+
+}  // namespace
+
 }  // namespace samplerate
 
 namespace sr = samplerate;
@@ -486,9 +715,66 @@ NB_MODULE(samplerate, m) {
       .def_ro("channels", &sr::Resampler::_channels,
                      "Number of channels.");
 
+  nb::class_<sr::CallbackResampler>(m_converters, "CallbackResampler",
+                                    R"mydelimiter(
+    CallbackResampler.
+
+    Parameters
+    ----------
+    callback : function
+        Function that returns new frames on each call, or `None` otherwise.
+        Input data with one or more channels is represented as a 2D array of shape
+        (`num_frames`, `num_channels`).
+        A single channel can be provided as a 1D array of `num_frames` length.
+        For use with `libsamplerate`, `input_data` is converted to 32-bit float and
+        C (row-major) memory order.
+    ratio : float
+        Conversion ratio = output sample rate / input sample rate.
+    converter_type : ConverterType, str, or int
+        Sample rate converter.
+    channels : int
+        Number of channels.
+    )mydelimiter")
+      .def(nb::init<const callback_t &, double, const nb::object &, int>(),
+           "callback"_a, "ratio"_a, "converter_type"_a = "sinc_best",
+           "channels"_a = 1)
+      .def(nb::init<sr::CallbackResampler>())
+      .def("read", &sr::CallbackResampler::read, R"mydelimiter(
+            Read a number of frames from the resampler.
+
+            Parameters
+            ----------
+            num_frames : int
+                Number of frames to read.
+
+            Returns
+            -------
+            output_data : ndarray
+                Resampled frames as a (`num_output_frames`, `num_channels`) or
+                (`num_output_frames`,) array. Note that this may return fewer frames
+                than requested, for example when no more input is available.
+           )mydelimiter",
+           "num_frames"_a)
+      .def("reset", &sr::CallbackResampler::reset, "Reset state.")
+      .def("set_starting_ratio", &sr::CallbackResampler::set_starting_ratio,
+           "Set the starting conversion ratio for the next `read` call.")
+      .def("clone", &sr::CallbackResampler::clone,
+           "Create a copy of the resampler object.")
+      .def("__enter__", &sr::CallbackResampler::__enter__,
+           nb::rv_policy::reference_internal)
+      .def("__exit__", &sr::CallbackResampler::__exit__)
+      .def_rw(
+          "ratio", &sr::CallbackResampler::_ratio,
+          "Conversion ratio = output sample rate / input sample rate.")
+      .def_ro("converter_type", &sr::CallbackResampler::_converter_type,
+                     "Converter type.")
+      .def_ro("channels", &sr::CallbackResampler::_channels,
+                     "Number of channels.");
+
   // Convenience imports
   m.attr("ResamplingError") = m_exceptions.attr("ResamplingError");
   m.attr("resample") = m_converters.attr("resample");
   m.attr("Resampler") = m_converters.attr("Resampler");
+  m.attr("CallbackResampler") = m_converters.attr("CallbackResampler");
   m.attr("ConverterType") = m_converters.attr("ConverterType");
 }
