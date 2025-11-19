@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "setuptools_scm[toml]>=6.2", "cmake"]
+requires = ["setuptools>=80", "setuptools-scm>=8", "cmake"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -22,7 +22,6 @@ classifiers=[
   "Topic :: Multimedia :: Sound/Audio",
 ]
 keywords=["samplerate", "converter", "signal processing", "audio"]
-license = "MIT"
 dependencies = [
     "numpy>=1.7.0",
 
