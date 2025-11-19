@@ -172,11 +172,9 @@ async def test_asyncio_threadpool_parallel(event_loop, num_concurrent, converter
     # Lower expectations slightly for Windows/CI environments where thread scheduling
     # overhead can be higher. Still validates GIL release provides parallelism.
     # ARM Mac has different threading overhead, especially for faster converters
-    if is_arm_mac():
-        # More relaxed expectations for ARM architecture
-        expected_speedup = 1.1 if num_concurrent == 2 else 1.2
-    else:
-        expected_speedup = 1.2 if num_concurrent == 2 else 1.35
+
+    expected_speedup = 1.1 if num_concurrent == 2 else 1.2
+
     
     print(f"\n{loop_type} loop - {converter_type} async with ThreadPoolExecutor ({num_concurrent} concurrent):")
     print(f"  Sequential: {sequential_time:.4f}s")

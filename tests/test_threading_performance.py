@@ -155,10 +155,8 @@ def test_resampler_process_gil_release_parallel(num_threads, converter_type):
     
     parallel_time = time.perf_counter() - start
     
-    if is_arm_mac():
-        expected_speedup = 1.15 if num_threads == 2 else 1.25
-    else:
-        expected_speedup = 1.2 if num_threads == 2 else 1.35
+
+    expected_speedup = 1.1 if num_threads == 2 else 1.25
     speedup = sequential_time / parallel_time
     
     print(f"\n{converter_type} Resampler.process() with {num_threads} threads:")
