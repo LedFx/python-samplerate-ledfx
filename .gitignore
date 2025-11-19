@@ -15,3 +15,8 @@ tags
 .vscode/
 
 samplerate/_src.py
+
+# Compiled extensions
+*.so
+*.pyd
+*.dll
