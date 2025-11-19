@@ -9,6 +9,15 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(pybind11)
 
+# nanobind
+FetchContent_Declare(
+  nanobind
+  GIT_REPOSITORY https://github.com/wjakob/nanobind
+  GIT_TAG v2.9.2
+)
+
+FetchContent_MakeAvailable(nanobind)
+
 # libsamplerate
 set(BUILD_TESTING OFF CACHE BOOL "Disable libsamplerate test build")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
