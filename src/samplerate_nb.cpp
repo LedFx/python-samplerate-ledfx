@@ -214,6 +214,147 @@ nb::ndarray<nb::numpy, float> resample(
   }
 }
 
+class Resampler {
+ private:
+  SRC_STATE *_state = nullptr;
+
+ public:
+  int _converter_type = 0;
+  int _channels = 0;
+
+ public:
+  Resampler(const nb::object &converter_type, int channels)
+      : _converter_type(get_converter_type(converter_type)),
+        _channels(channels) {
+    int _err_num = 0;
+    _state = src_new(_converter_type, _channels, &_err_num);
+    error_handler(_err_num);
+  }
+
+  // copy constructor
+  Resampler(const Resampler &r)
+      : _converter_type(r._converter_type), _channels(r._channels) {
+    int _err_num = 0;
+    _state = src_clone(r._state, &_err_num);
+    error_handler(_err_num);
+  }
+
+  // move constructor
+  Resampler(Resampler &&r)
+      : _state(r._state),
+        _converter_type(r._converter_type),
+        _channels(r._channels) {
+    r._state = nullptr;
+    r._converter_type = 0;
+    r._channels = 0;
+  }
+
+  ~Resampler() { src_delete(_state); }  // src_delete handles nullptr case
+
+  nb::ndarray<nb::numpy, float> process(
+      const nb::ndarray<nb::numpy, const float, nb::c_contig> &input,
+      double sr_ratio, bool end_of_input) {
+    // Get array dimensions
+    size_t ndim = input.ndim();
+    size_t num_frames = input.shape(0);
+
+    // set the number of channels
+    int channels = 1;
+    if (ndim == 2)
+      channels = input.shape(1);
+    else if (ndim > 2)
+      throw std::domain_error("Input array should have at most 2 dimensions");
+
+    if (channels != _channels || channels == 0)
+      throw std::domain_error("Invalid number of channels in input data.");
+
+    // Add a "fudge factor" to the size. This is because the actual number of
+    // output samples generated on the last call when input is terminated can
+    // be more than the expected number of output samples during mid-stream
+    // steady-state processing. (Also, when the stream is started, the number
+    // of output samples generated will generally be zero or otherwise less
+    // than the number of samples in mid-stream processing.)
+    const auto new_size =
+        static_cast<size_t>(std::ceil(num_frames * sr_ratio))
+        + END_OF_INPUT_EXTRA_OUTPUT_FRAMES;
+
+    // Allocate output array
+    size_t total_elements = new_size * channels;
+    float* output_data = new float[total_elements];
+    
+    // Create capsule for memory management
+    nb::capsule owner(output_data, [](void* p) noexcept {
+      delete[] static_cast<float*>(p);
+    });
+
+    // libsamplerate struct
+    SRC_DATA src_data = {
+        const_cast<float *>(input.data()),  // data_in
+        output_data,                         // data_out
+        static_cast<long>(num_frames),       // input_frames
+        long(new_size),                      // output_frames
+        0,             // input_frames_used, filled by libsamplerate
+        0,             // output_frames_gen, filled by libsamplerate
+        end_of_input,  // end_of_input
+        sr_ratio       // src_ratio, sampling rate conversion ratio
+    };
+
+    // Release GIL for the entire resampling operation
+    int err_code;
+    long output_frames_gen;
+    {
+      nb::gil_scoped_release release;
+      err_code = src_process(_state, &src_data);
+      output_frames_gen = src_data.output_frames_gen;
+    }
+    error_handler(err_code);
+
+    // Handle unexpected output size
+    if ((size_t)output_frames_gen > new_size) {
+      // This means our fudge factor is too small.
+      throw std::runtime_error("Generated more output samples than expected!");
+    }
+
+    // Create output ndarray with proper shape and stride
+    size_t output_shape[2];
+    int64_t output_stride[2];
+    
+    if (ndim == 2) {
+      output_shape[0] = output_frames_gen;
+      output_shape[1] = channels;
+      output_stride[0] = channels * sizeof(float);
+      output_stride[1] = sizeof(float);
+      
+      return nb::ndarray<nb::numpy, float>(
+          output_data,
+          2,
+          output_shape,
+          owner,
+          output_stride
+      );
+    } else {
+      output_shape[0] = output_frames_gen;
+      output_stride[0] = sizeof(float);
+      
+      return nb::ndarray<nb::numpy, float>(
+          output_data,
+          1,
+          output_shape,
+          owner,
+          output_stride
+      );
+    }
+  }
+
+  void set_ratio(double new_ratio) {
+    error_handler(src_set_ratio(_state, new_ratio));
+  }
+
+  void reset() { error_handler(src_reset(_state)); }
+
+  Resampler clone() const { return Resampler(*this); }
+};
+
 }  // namespace samplerate
 
 namespace sr = samplerate;
@@ -296,8 +437,58 @@ NB_MODULE(samplerate, m) {
                    "input"_a, "ratio"_a, "converter_type"_a = "sinc_best",
                    "verbose"_a = false);
 
+  nb::class_<sr::Resampler>(m_converters, "Resampler", R"mydelimiter(
+    Resampler.
+
+    Parameters
+    ----------
+    converter_type : ConverterType, str, or int
+        Sample rate converter (default: `sinc_best`).
+    num_channels : int
+        Number of channels.
+  )mydelimiter")
+      .def(nb::init<const nb::object &, int>(),
+           "converter_type"_a = "sinc_best", "channels"_a = 1)
+      .def(nb::init<sr::Resampler>())
+      .def("process", &sr::Resampler::process, R"mydelimiter(
+        Resample the signal in `input_data`.
+
+        Parameters
+        ----------
+        input_data : ndarray
+            Input data.
+            Input data with one or more channels is represented as a 2D array of shape
+            (`num_frames`, `num_channels`).
+            A single channel can be provided as a 1D array of `num_frames` length.
+            For use with `libsamplerate`, `input_data` is converted to 32-bit float and
+            C (row-major) memory order.
+        ratio : float
+            Conversion ratio = output sample rate / input sample rate.
+        end_of_input : int
+            Set to `True` if no more data is available, or to `False` otherwise.
+        verbose : bool
+            If `True`, print additional information about the conversion.
+
+        Returns
+        -------
+        output_data : ndarray
+            Resampled input data.
+      )mydelimiter",
+           "input"_a, "ratio"_a, "end_of_input"_a = false)
+      .def("reset", &sr::Resampler::reset, "Reset internal state.")
+      .def("set_ratio", &sr::Resampler::set_ratio,
+           "Set a new conversion ratio immediately.")
+      .def("clone", &sr::Resampler::clone,
+           "Creates a copy of the resampler object with the same internal "
+           "state.")
+      .def_ro("converter_type", &sr::Resampler::_converter_type,
+                     "Converter type.")
+      .def_ro("channels", &sr::Resampler::_channels,
+                     "Number of channels.");
+
   // Convenience imports
   m.attr("ResamplingError") = m_exceptions.attr("ResamplingError");
   m.attr("resample") = m_converters.attr("resample");
+  m.attr("Resampler") = m_converters.attr("Resampler");
   m.attr("ConverterType") = m_converters.attr("ConverterType");
 }
