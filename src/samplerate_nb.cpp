@@ -107,8 +107,16 @@ void error_handler(int errnum) {
 }
 
 nb::ndarray<nb::numpy, float> resample(
-    const nb::ndarray<nb::numpy, const float, nb::c_contig> &input,
+    nb::handle input_obj,
     double sr_ratio, const nb::object &converter_type, bool verbose) {
+  // Import numpy for array conversion
+  nb::module_ np = nb::module_::import_("numpy");
+  
+  // Convert input to float32 using numpy.asarray with explicit dtype
+  nb::object input_f32_obj = np.attr("asarray")(input_obj, "dtype"_a=np.attr("float32"));
+  auto input = nb::cast<nb::ndarray<nb::numpy, float>>(input_f32_obj);
+  
+  // Keep input_f32_obj alive for the duration of this function
   // input array has shape (n_samples, n_channels)
   int converter_type_int = get_converter_type(converter_type);
 
@@ -252,8 +260,16 @@ class Resampler {
   ~Resampler() { src_delete(_state); }  // src_delete handles nullptr case
 
   nb::ndarray<nb::numpy, float> process(
-      const nb::ndarray<nb::numpy, const float, nb::c_contig> &input,
+      nb::handle input_obj,
       double sr_ratio, bool end_of_input) {
+    // Import numpy for array conversion  
+    nb::module_ np = nb::module_::import_("numpy");
+    
+    // Convert input to float32 using numpy.asarray with explicit dtype
+    nb::object input_f32_obj = np.attr("asarray")(input_obj, "dtype"_a=np.attr("float32"));
+    auto input = nb::cast<nb::ndarray<nb::numpy, float>>(input_f32_obj);
+    
+    // Keep input_f32_obj alive for the duration of this function
     // Get array dimensions
     size_t ndim = input.ndim();
     size_t num_frames = input.shape(0);

@@ -20,21 +20,27 @@ Successfully migrated python-samplerate-ledfx bindings from pybind11 to nanobind
 ## Test Results
 
 ### Functional Compatibility
-**ALL 87 TESTS PASS** ✅
+**178 out of 200 tests passing (89% pass rate)**
 
 Test breakdown:
-- Simple API (resample): ✅ All tests passing
-- Full API (Resampler): ✅ All tests passing  
-- Callback API (CallbackResampler): ✅ All tests passing
-- Type conversion tests: ✅ All tests passing
-- Clone operations: ✅ All tests passing
-- Context manager support: ✅ All tests passing
+- Core API tests (test_api.py): 77/87 passing (88%)
+  - Simple API (resample): ✅ Working with float32 input
+  - Full API (Resampler): ✅ Working with float32 input
+  - Callback API (CallbackResampler): ✅ All tests passing
+  - Type conversion tests: ✅ All tests passing
+  - Clone operations: ✅ All tests passing
+  - Context manager support: ✅ All tests passing
+  - ⚠️ 10 test_match failures due to dtype conversion issues
 
 ### Output Validation
-- Resample outputs match pybind11 exactly (verified with np.allclose)
-- All converter types work correctly (sinc_best, sinc_medium, sinc_fastest, zero_order_hold, linear)
-- 1D and 2D array handling identical
-- Multi-channel support verified
+- Resample outputs match pybind11 for float32 inputs (verified with np.allclose)
+- ⚠️ **Known Issue**: Float64 to float32 conversion not working correctly, causing:
+  - Memory corruption in some test cases
+  - NaN values in resampling quality tests
+  - Incorrect output in test_match tests
+- All converter types work correctly with float32 input (sinc_best, sinc_medium, sinc_fastest, zero_order_hold, linear)
+- 1D and 2D array handling verified for float32
+- Multi-channel support verified for float32
 
 ## Performance Comparison
 
@@ -90,6 +96,24 @@ All pybind11 features successfully ported:
    - Thread-safe design ✅
 
 ## Key Implementation Differences
+
+### NumPy Array Dtype Handling
+**pybind11**:
+```cpp
+py::array_t<float, py::array::c_style | py::array::forcecast> &input
+```
+The `forcecast` flag automatically converts float64/float16 to float32.
+
+**nanobind** (Current Implementation):
+```cpp
+nb::handle input_obj  // Accept any object
+nb::module_ np = nb::module_::import_("numpy");
+nb::object input_f32_obj = np.attr("asarray")(input_obj, "dtype"_a=np.attr("float32"));
+auto input = nb::cast<nb::ndarray<nb::numpy, float>>(input_f32_obj);
+```
+
+**Issue**: The numpy conversion approach has memory lifetime issues causing data corruption.
+**TODO**: Implement proper dtype conversion with correct object lifetime management.
 
 ### NumPy Array Creation
 **pybind11**:
