@@ -11,6 +11,7 @@ FetchContent_MakeAvailable(pybind11)
 
 # libsamplerate
 set(BUILD_TESTING OFF CACHE BOOL "Disable libsamplerate test build")
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 FetchContent_Declare(
   libsamplerate
