@@ -10,7 +10,7 @@ authors=[
 {"name" = "Robin Scheibler", "email" ="fakufaku@gmail.com"},
 {"name" = "Tino Wagner", "email" ="ich@tinowagner.com"}
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 classifiers=[
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -28,6 +28,10 @@ dependencies = [
 ]
 
 [dependency-groups]
+dev = [
+    "setuptools>=80",
+    "setuptools-scm>=8",
+]
 test = [
   "pytest",
   "pytest-asyncio",
