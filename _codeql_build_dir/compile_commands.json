@@ -1,0 +1,32 @@
+[
+{
+  "directory": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir",
+  "command": "/home/runner/work/python-samplerate-ledfx/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++ -DLIBSAMPLERATE_VERSION=\\\"0.2.2\\\" -Dpython_samplerate_EXPORTS -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/./external/libsamplerate/include -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/include -isystem /usr/include/python3.12 -isystem /home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/pybind11-src/include -O3 -DNDEBUG -fPIC -fvisibility=hidden -std=c++14 -O3 -Wall -Wextra -fPIC -flto=auto -fno-fat-lto-objects -o CMakeFiles/python-samplerate.dir/src/samplerate.cpp.o -c /home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/src/samplerate.cpp",
+  "file": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/src/samplerate.cpp",
+  "output": "CMakeFiles/python-samplerate.dir/src/samplerate.cpp.o"
+},
+{
+  "directory": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-build/src",
+  "command": "/home/runner/work/python-samplerate-ledfx/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -DHAVE_CONFIG_H -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-build -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/include -O3 -DNDEBUG -std=gnu99 -fPIC -o CMakeFiles/samplerate.dir/samplerate.c.o -c /home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/src/samplerate.c",
+  "file": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/src/samplerate.c",
+  "output": "_deps/libsamplerate-build/src/CMakeFiles/samplerate.dir/samplerate.c.o"
+},
+{
+  "directory": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-build/src",
+  "command": "/home/runner/work/python-samplerate-ledfx/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -DHAVE_CONFIG_H -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-build -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/include -O3 -DNDEBUG -std=gnu99 -fPIC -o CMakeFiles/samplerate.dir/src_linear.c.o -c /home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/src/src_linear.c",
+  "file": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/src/src_linear.c",
+  "output": "_deps/libsamplerate-build/src/CMakeFiles/samplerate.dir/src_linear.c.o"
+},
+{
+  "directory": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-build/src",
+  "command": "/home/runner/work/python-samplerate-ledfx/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -DHAVE_CONFIG_H -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-build -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/include -O3 -DNDEBUG -std=gnu99 -fPIC -o CMakeFiles/samplerate.dir/src_sinc.c.o -c /home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/src/src_sinc.c",
+  "file": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/src/src_sinc.c",
+  "output": "_deps/libsamplerate-build/src/CMakeFiles/samplerate.dir/src_sinc.c.o"
+},
+{
+  "directory": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-build/src",
+  "command": "/home/runner/work/python-samplerate-ledfx/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -DHAVE_CONFIG_H -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-build -I/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/include -O3 -DNDEBUG -std=gnu99 -fPIC -o CMakeFiles/samplerate.dir/src_zoh.c.o -c /home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/src/src_zoh.c",
+  "file": "/home/runner/work/python-samplerate-ledfx/python-samplerate-ledfx/_codeql_build_dir/_deps/libsamplerate-src/src/src_zoh.c",
+  "output": "_deps/libsamplerate-build/src/CMakeFiles/samplerate.dir/src_zoh.c.o"
+}
+]
