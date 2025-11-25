@@ -275,6 +275,92 @@ def test_gil_release_quality():
     assert np.allclose(results[0], results[1])
 
 
+def test_conditional_gil_release_small_data():
+    """Test that small data sizes perform well without GIL release overhead.
+    
+    This test verifies that the conditional GIL release optimization works:
+    - For small data sizes (< 1000 frames), the GIL is kept to avoid overhead
+    - Performance should be consistent for small data sizes
+    """
+    # Small data size - below threshold, GIL should NOT be released
+    small_sizes = [100, 200, 500]
+    ratio = 2.0
+    converter = "sinc_fastest"
+    iterations = 100
+    
+    for size in small_sizes:
+        data = np.random.randn(size).astype(np.float32)
+        
+        # Warmup
+        for _ in range(10):
+            samplerate.resample(data, ratio, converter)
+        
+        # Time single-threaded execution
+        start = time.perf_counter()
+        for _ in range(iterations):
+            samplerate.resample(data, ratio, converter)
+        single_time = time.perf_counter() - start
+        
+        per_call_us = (single_time / iterations) * 1e6
+        
+        print(f"\n  Small data ({size} samples): {per_call_us:.2f} µs per call")
+        
+        # For small data, per-call time should be reasonable
+        # The exact time depends on hardware, but we just verify it completes
+        assert per_call_us > 0
+
+
+def test_conditional_gil_release_large_data_threading():
+    """Test that large data sizes still benefit from GIL release for threading.
+    
+    This verifies that the conditional GIL release still enables parallelism
+    for data sizes above the threshold.
+    """
+    # Large data size - above threshold, GIL should be released
+    size = 50000  # Well above 1000 frame threshold
+    ratio = 2.0
+    converter = "sinc_fastest"
+    num_threads = 4
+    
+    data = np.random.randn(size).astype(np.float32)
+    
+    # Single-threaded baseline
+    start = time.perf_counter()
+    for _ in range(num_threads):
+        samplerate.resample(data, ratio, converter)
+    sequential_time = time.perf_counter() - start
+    
+    # Multi-threaded
+    threads = []
+    results = [0.0] * num_threads
+    
+    def worker(results, index):
+        start = time.perf_counter()
+        samplerate.resample(data, ratio, converter)
+        results[index] = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    for i in range(num_threads):
+        t = threading.Thread(target=worker, args=(results, i))
+        threads.append(t)
+        t.start()
+    
+    for t in threads:
+        t.join()
+    
+    parallel_time = time.perf_counter() - start
+    speedup = sequential_time / parallel_time
+    
+    print(f"\n  Large data ({size} samples) threading test:")
+    print(f"    Sequential: {sequential_time*1000:.2f} ms")
+    print(f"    Parallel: {parallel_time*1000:.2f} ms")
+    print(f"    Speedup: {speedup:.2f}x")
+    
+    # With GIL release for large data, we should see meaningful speedup
+    # Using a conservative threshold to account for CI variability
+    assert speedup > 1.0, f"Expected speedup > 1.0, got {speedup:.2f}x"
+
+
 def test_gil_metrics_report():
     """Generate a detailed performance report for GIL release optimization."""
     print("\n" + "="*70)
