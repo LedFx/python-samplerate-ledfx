@@ -199,19 +199,20 @@ class Resampler {
         sr_ratio       // src_ratio, sampling rate conversion ratio
     };
 
-    // Only release GIL for large data sizes where resampling work dominates
-    // the GIL release/acquire overhead. For small data, keep the GIL to avoid
-    // unnecessary overhead in single-threaded scenarios.
+    // Perform resampling - only release GIL for large data sizes where
+    // resampling work dominates the GIL release/acquire overhead
+    auto do_resample = [&]() {
+      return src_process(_state, &src_data);
+    };
+
     int err_code;
-    long output_frames_gen;
     if (inbuf.shape[0] >= GIL_RELEASE_THRESHOLD_FRAMES) {
       py::gil_scoped_release release;
-      err_code = src_process(_state, &src_data);
-      output_frames_gen = src_data.output_frames_gen;
+      err_code = do_resample();
     } else {
-      err_code = src_process(_state, &src_data);
-      output_frames_gen = src_data.output_frames_gen;
+      err_code = do_resample();
     }
+    long output_frames_gen = src_data.output_frames_gen;
     error_handler(err_code);
 
     // create a shorter view of the array
@@ -339,26 +340,26 @@ class CallbackResampler {
     // clear any previous callback error
     clear_callback_error();
 
-    // read from the callback - note: GIL is managed by the_callback_func
-    // which acquires it only when calling the Python callback.
-    // Only release GIL for large frame counts where resampling work dominates
-    // the GIL release/acquire overhead.
-    size_t output_frames_gen = 0;
-    int err_code = 0;
+    // Perform callback resampling - only release GIL for large frame counts
+    // where resampling work dominates the GIL release/acquire overhead.
+    // Note: the_callback_func will acquire GIL when calling Python callback.
+    auto do_callback_read = [&]() {
+      size_t gen = src_callback_read(_state, _ratio, (long)frames,
+                                     static_cast<float *>(outbuf.ptr));
+      return std::make_pair(gen, gen == 0 ? src_error(_state) : 0);
+    };
+
+    size_t output_frames_gen;
+    int err_code;
     if (frames >= GIL_RELEASE_THRESHOLD_FRAMES) {
       py::gil_scoped_release release;
-      output_frames_gen = src_callback_read(_state, _ratio, (long)frames,
-                                            static_cast<float *>(outbuf.ptr));
-      // Get error code while GIL is released
-      if (output_frames_gen == 0) {
-        err_code = src_error(_state);
-      }
+      auto result = do_callback_read();
+      output_frames_gen = result.first;
+      err_code = result.second;
     } else {
-      output_frames_gen = src_callback_read(_state, _ratio, (long)frames,
-                                            static_cast<float *>(outbuf.ptr));
-      if (output_frames_gen == 0) {
-        err_code = src_error(_state);
-      }
+      auto result = do_callback_read();
+      output_frames_gen = result.first;
+      err_code = result.second;
     }
 
     // check if callback had an error
@@ -490,22 +491,21 @@ py::array_t<float, py::array::c_style> resample(
       sr_ratio  // src_ratio, sampling rate conversion ratio
   };
 
-  // Only release GIL for large data sizes where resampling work dominates
-  // the GIL release/acquire overhead. For small data, keep the GIL to avoid
-  // unnecessary overhead in single-threaded scenarios.
+  // Perform resampling - only release GIL for large data sizes where
+  // resampling work dominates the GIL release/acquire overhead
+  auto do_resample = [&]() {
+    return src_simple(&src_data, converter_type_int, channels);
+  };
+
   int err_code;
-  long output_frames_gen;
-  long input_frames_used;
   if (inbuf.shape[0] >= GIL_RELEASE_THRESHOLD_FRAMES) {
     py::gil_scoped_release release;
-    err_code = src_simple(&src_data, converter_type_int, channels);
-    output_frames_gen = src_data.output_frames_gen;
-    input_frames_used = src_data.input_frames_used;
+    err_code = do_resample();
   } else {
-    err_code = src_simple(&src_data, converter_type_int, channels);
-    output_frames_gen = src_data.output_frames_gen;
-    input_frames_used = src_data.input_frames_used;
+    err_code = do_resample();
   }
+  long output_frames_gen = src_data.output_frames_gen;
+  long input_frames_used = src_data.input_frames_used;
   error_handler(err_code);
 
   // create a shorter view of the array
