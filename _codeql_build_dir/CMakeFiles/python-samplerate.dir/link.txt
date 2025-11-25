@@ -1,1 +1,0 @@
-/home/runner/work/python-samplerate-ledfx/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -fPIC -O3 -DNDEBUG -flto=auto -Wl,--dependency-file=CMakeFiles/python-samplerate.dir/link.d -shared  -o samplerate.cpython-312-x86_64-linux-gnu.so "CMakeFiles/python-samplerate.dir/src/samplerate.cpp.o"  _deps/libsamplerate-build/src/libsamplerate.a -lm -lm -lstdc++ -lm
