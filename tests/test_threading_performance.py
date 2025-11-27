@@ -423,8 +423,8 @@ def test_release_gil_parameter_invalid():
     """Test that invalid release_gil values raise appropriate errors."""
     data = np.random.randn(100).astype(np.float32)
     
-    # Invalid string value should raise an error
-    with pytest.raises(Exception):
+    # Invalid string value should raise a ValueError
+    with pytest.raises(ValueError, match="Invalid release_gil"):
         samplerate.resample(data, 2.0, "sinc_fastest", verbose=False, release_gil="invalid")
     
     print("\n  Invalid release_gil parameter test passed!")
