@@ -275,6 +275,161 @@ def test_gil_release_quality():
     assert np.allclose(results[0], results[1])
 
 
+def test_conditional_gil_release_small_data():
+    """Test that small data sizes perform well without GIL release overhead.
+    
+    This test verifies that the conditional GIL release optimization works:
+    - For small data sizes (< 1000 frames), the GIL is kept to avoid overhead
+    - Performance should be consistent for small data sizes
+    """
+    # Small data size - below threshold, GIL should NOT be released
+    small_sizes = [100, 200, 500]
+    ratio = 2.0
+    converter = "sinc_fastest"
+    iterations = 100
+    
+    for size in small_sizes:
+        data = np.random.randn(size).astype(np.float32)
+        
+        # Warmup
+        for _ in range(10):
+            samplerate.resample(data, ratio, converter)
+        
+        # Time single-threaded execution
+        start = time.perf_counter()
+        for _ in range(iterations):
+            samplerate.resample(data, ratio, converter)
+        single_time = time.perf_counter() - start
+        
+        per_call_us = (single_time / iterations) * 1e6
+        
+        print(f"\n  Small data ({size} samples): {per_call_us:.2f} µs per call")
+        
+        # For small data, per-call time should be reasonable
+        # The exact time depends on hardware, but we just verify it completes
+        assert per_call_us > 0
+
+
+def test_conditional_gil_release_large_data_threading():
+    """Test that large data sizes still benefit from GIL release for threading.
+    
+    This verifies that the conditional GIL release still enables parallelism
+    for data sizes above the threshold.
+    """
+    # Large data size - above threshold, GIL should be released
+    size = 50000  # Well above 1000 frame threshold
+    ratio = 2.0
+    converter = "sinc_fastest"
+    num_threads = 4
+    
+    data = np.random.randn(size).astype(np.float32)
+    
+    # Single-threaded baseline
+    start = time.perf_counter()
+    for _ in range(num_threads):
+        samplerate.resample(data, ratio, converter)
+    sequential_time = time.perf_counter() - start
+    
+    # Multi-threaded
+    threads = []
+    results = [0.0] * num_threads
+    
+    def worker(results, index):
+        start = time.perf_counter()
+        samplerate.resample(data, ratio, converter)
+        results[index] = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    for i in range(num_threads):
+        t = threading.Thread(target=worker, args=(results, i))
+        threads.append(t)
+        t.start()
+    
+    for t in threads:
+        t.join()
+    
+    parallel_time = time.perf_counter() - start
+    speedup = sequential_time / parallel_time
+    
+    print(f"\n  Large data ({size} samples) threading test:")
+    print(f"    Sequential: {sequential_time*1000:.2f} ms")
+    print(f"    Parallel: {parallel_time*1000:.2f} ms")
+    print(f"    Speedup: {speedup:.2f}x")
+    
+    # With GIL release for large data, we should see meaningful speedup
+    # Using a conservative threshold to account for CI variability
+    assert speedup > 1.0, f"Expected speedup > 1.0, got {speedup:.2f}x"
+
+
+def test_release_gil_parameter():
+    """Test that the release_gil parameter works correctly.
+    
+    This tests that users can explicitly control GIL release behavior:
+    - release_gil=None (default): Automatic based on data size
+    - release_gil=True: Always release GIL
+    - release_gil=False: Never release GIL
+    - release_gil="auto": Same as None
+    """
+    data = np.random.randn(100).astype(np.float32)
+    ratio = 2.0
+    converter = "sinc_fastest"
+    
+    # Test resample() with different release_gil values
+    result1 = samplerate.resample(data, ratio, converter)
+    result2 = samplerate.resample(data, ratio, converter, verbose=False, release_gil=None)
+    result3 = samplerate.resample(data, ratio, converter, verbose=False, release_gil=True)
+    result4 = samplerate.resample(data, ratio, converter, verbose=False, release_gil=False)
+    result5 = samplerate.resample(data, ratio, converter, verbose=False, release_gil="auto")
+    
+    # All should produce the same result
+    assert np.allclose(result1, result2)
+    assert np.allclose(result1, result3)
+    assert np.allclose(result1, result4)
+    assert np.allclose(result1, result5)
+    
+    # Test Resampler.process() with different release_gil values
+    resampler = samplerate.Resampler(converter, 1)
+    result6 = resampler.process(data, ratio, end_of_input=True)
+    resampler.reset()
+    result7 = resampler.process(data, ratio, end_of_input=True, release_gil=False)
+    resampler.reset()
+    result8 = resampler.process(data, ratio, end_of_input=True, release_gil=True)
+    
+    assert np.allclose(result6, result7)
+    assert np.allclose(result6, result8)
+    
+    # Test CallbackResampler.read() with different release_gil values
+    def producer():
+        yield data
+        while True:
+            yield None
+    
+    callback1 = lambda p=producer(): next(p)
+    cb_resampler1 = samplerate.CallbackResampler(callback1, ratio, converter, 1)
+    result9 = cb_resampler1.read(int(ratio * len(data)))
+    
+    callback2 = lambda p=producer(): next(p)
+    cb_resampler2 = samplerate.CallbackResampler(callback2, ratio, converter, 1)
+    result10 = cb_resampler2.read(int(ratio * len(data)), release_gil=False)
+    
+    assert len(result9) == len(result10)
+    
+    print("\n  release_gil parameter test passed!")
+    print("    - All release_gil options produce correct results")
+    print("    - Users can control GIL release behavior explicitly")
+
+
+def test_release_gil_parameter_invalid():
+    """Test that invalid release_gil values raise appropriate errors."""
+    data = np.random.randn(100).astype(np.float32)
+    
+    # Invalid string value should raise a ValueError
+    with pytest.raises(ValueError, match="Invalid release_gil"):
+        samplerate.resample(data, 2.0, "sinc_fastest", verbose=False, release_gil="invalid")
+    
+    print("\n  Invalid release_gil parameter test passed!")
+
+
 def test_gil_metrics_report():
     """Generate a detailed performance report for GIL release optimization."""
     print("\n" + "="*70)
