@@ -58,6 +58,33 @@ assert np.allclose(output_data_simple, output_data_full)
 
 See `samplerate.resample`, `samplerate.Resampler`, and `samplerate.CallbackResampler` in the API documentation for details.
 
+## Multi-threading and GIL Control
+
+All resampling methods support a `release_gil` parameter that controls Python's Global Interpreter Lock (GIL) during resampling operations. This is useful for optimizing performance in different scenarios:
+
+``` python
+import samplerate
+
+# Default: "auto" mode - releases GIL only for large data (>= 1000 frames)
+# Balances single-threaded performance with multi-threading capability
+output = samplerate.resample(input_data, ratio)
+
+# Force GIL release - best for multi-threaded applications
+# Allows other Python threads to run during resampling
+output = samplerate.resample(input_data, ratio, release_gil=True)
+
+# Disable GIL release - best for single-threaded applications with small data
+# Avoids the ~1-5µs overhead of GIL release/acquire
+output = samplerate.resample(input_data, ratio, release_gil=False)
+```
+
+The same parameter is available on `Resampler.process()` and `CallbackResampler.read()`:
+
+``` python
+resampler = samplerate.Resampler('sinc_best', channels=1)
+output = resampler.process(input_data, ratio, release_gil=True)
+```
+
 ## See also
 
 -   [scikits.samplerate](https://pypi.python.org/pypi/scikits.samplerate) implements only the Simple API and uses [Cython](http://cython.org/) for extern calls. The resample function of scikits.samplerate and this package share the same function signature for compatiblity.
