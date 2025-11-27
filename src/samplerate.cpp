@@ -43,14 +43,14 @@
 // This value was empirically and somewhat arbitrarily chosen; increase it for further safety.
 #define END_OF_INPUT_EXTRA_OUTPUT_FRAMES 10000
 
-// Minimum number of input frames before releasing the GIL during resampling.
-// Releasing and re-acquiring the GIL has overhead (~1-5 µs), which becomes
-// negligible for larger data sizes but can significantly impact performance
-// for small data sizes. This threshold balances single-threaded performance
-// (avoiding GIL overhead for small data) with multi-threaded performance
-// (allowing parallelism for large data). Empirically chosen based on benchmarks
-// showing that at 1000 frames, the GIL overhead is < 1% of total execution time
-// for even the fastest converter types.
+// Minimum number of input frames before releasing the GIL during resampling
+// when using automatic GIL management. Releasing and re-acquiring the GIL has
+// overhead (~1-5 µs), which becomes negligible for larger data sizes but can
+// significantly impact performance for small data sizes. This threshold
+// balances single-threaded performance (avoiding GIL overhead for small data)
+// with multi-threaded performance (allowing parallelism for large data).
+// Empirically chosen based on benchmarks showing that at 1000 frames, the GIL
+// overhead is < 1% of total execution time for even the fastest converter types.
 #define GIL_RELEASE_THRESHOLD_FRAMES 1000
 
 namespace py = pybind11;
@@ -63,6 +63,27 @@ using np_array_f32 =
     py::array_t<float, py::array::c_style | py::array::forcecast>;
 
 namespace samplerate {
+
+// Helper to determine if GIL should be released based on user preference
+// and data size. The release_gil parameter can be:
+//   - py::none() or "auto": Release GIL only for large data (>= threshold)
+//   - True: Always release GIL (good for multi-threaded applications)
+//   - False: Never release GIL (good for single-threaded, small data)
+bool should_release_gil(const py::object &release_gil, long num_frames) {
+  if (release_gil.is_none()) {
+    // "auto" mode: release GIL only for large data sizes
+    return num_frames >= GIL_RELEASE_THRESHOLD_FRAMES;
+  } else if (py::isinstance<py::bool_>(release_gil)) {
+    return release_gil.cast<bool>();
+  } else if (py::isinstance<py::str>(release_gil)) {
+    std::string s = release_gil.cast<std::string>();
+    if (s == "auto") {
+      return num_frames >= GIL_RELEASE_THRESHOLD_FRAMES;
+    }
+    throw std::domain_error("Invalid release_gil value. Use True, False, None, or 'auto'.");
+  }
+  throw std::domain_error("Invalid release_gil type. Use True, False, None, or 'auto'.");
+}
 
 enum class ConverterType {
   sinc_best,
@@ -157,7 +178,8 @@ class Resampler {
 
   py::array_t<float, py::array::c_style> process(
       py::array_t<float, py::array::c_style | py::array::forcecast> input,
-      double sr_ratio, bool end_of_input) {
+      double sr_ratio, bool end_of_input,
+      const py::object &release_gil = py::none()) {
     // accessors for the arrays
     py::buffer_info inbuf = input.request();
 
@@ -199,14 +221,13 @@ class Resampler {
         sr_ratio       // src_ratio, sampling rate conversion ratio
     };
 
-    // Perform resampling - only release GIL for large data sizes where
-    // resampling work dominates the GIL release/acquire overhead
+    // Perform resampling with optional GIL release
     auto do_resample = [&]() {
       return src_process(_state, &src_data);
     };
 
     int err_code;
-    if (inbuf.shape[0] >= GIL_RELEASE_THRESHOLD_FRAMES) {
+    if (should_release_gil(release_gil, inbuf.shape[0])) {
       py::gil_scoped_release release;
       err_code = do_resample();
     } else {
@@ -329,7 +350,8 @@ class CallbackResampler {
     return input;
   }
 
-  py::array_t<float, py::array::c_style> read(size_t frames) {
+  py::array_t<float, py::array::c_style> read(
+      size_t frames, const py::object &release_gil = py::none()) {
     // allocate output array
     std::vector<size_t> out_shape{frames, _channels};
     auto output = py::array_t<float, py::array::c_style>(out_shape);
@@ -340,8 +362,7 @@ class CallbackResampler {
     // clear any previous callback error
     clear_callback_error();
 
-    // Perform callback resampling - only release GIL for large frame counts
-    // where resampling work dominates the GIL release/acquire overhead.
+    // Perform callback resampling with optional GIL release.
     // Note: the_callback_func will acquire GIL when calling Python callback.
     auto do_callback_read = [&]() {
       size_t gen = src_callback_read(_state, _ratio, (long)frames,
@@ -351,7 +372,7 @@ class CallbackResampler {
 
     size_t output_frames_gen;
     int err_code;
-    if (frames >= GIL_RELEASE_THRESHOLD_FRAMES) {
+    if (should_release_gil(release_gil, (long)frames)) {
       py::gil_scoped_release release;
       auto result = do_callback_read();
       output_frames_gen = result.first;
@@ -449,7 +470,8 @@ long the_callback_func(void *cb_data, float **data) {
 
 py::array_t<float, py::array::c_style> resample(
     const py::array_t<float, py::array::c_style | py::array::forcecast> &input,
-    double sr_ratio, const py::object &converter_type, bool verbose) {
+    double sr_ratio, const py::object &converter_type, bool verbose,
+    const py::object &release_gil = py::none()) {
   // input array has shape (n_samples, n_channels)
   int converter_type_int = get_converter_type(converter_type);
 
@@ -491,14 +513,13 @@ py::array_t<float, py::array::c_style> resample(
       sr_ratio  // src_ratio, sampling rate conversion ratio
   };
 
-  // Perform resampling - only release GIL for large data sizes where
-  // resampling work dominates the GIL release/acquire overhead
+  // Perform resampling with optional GIL release
   auto do_resample = [&]() {
     return src_simple(&src_data, converter_type_int, channels);
   };
 
   int err_code;
-  if (inbuf.shape[0] >= GIL_RELEASE_THRESHOLD_FRAMES) {
+  if (should_release_gil(release_gil, inbuf.shape[0])) {
     py::gil_scoped_release release;
     err_code = do_resample();
   } else {
@@ -575,6 +596,11 @@ PYBIND11_MODULE(samplerate, m) {
         Sample rate converter (default: `sinc_best`).
     verbose : bool
         If `True`, print additional information about the conversion.
+    release_gil : bool, str, or None
+        Controls GIL release during resampling for multi-threading:
+        - `None` or `"auto"` (default): Release GIL only for large data (>= 1000 frames)
+        - `True`: Always release GIL (best for multi-threaded applications)
+        - `False`: Never release GIL (best for single-threaded, small data)
 
     Returns
     -------
@@ -588,7 +614,7 @@ PYBIND11_MODULE(samplerate, m) {
     conversion ratios.
   )mydelimiter",
                    "input"_a, "ratio"_a, "converter_type"_a = "sinc_best",
-                   "verbose"_a = false);
+                   "verbose"_a = false, "release_gil"_a = py::none());
 
   py::class_<sr::Resampler>(m_converters, "Resampler", R"mydelimiter(
     Resampler.
@@ -619,15 +645,18 @@ PYBIND11_MODULE(samplerate, m) {
             Conversion ratio = output sample rate / input sample rate.
         end_of_input : int
             Set to `True` if no more data is available, or to `False` otherwise.
-        verbose : bool
-            If `True`, print additional information about the conversion.
+        release_gil : bool, str, or None
+            Controls GIL release during resampling for multi-threading:
+            - `None` or `"auto"` (default): Release GIL only for large data (>= 1000 frames)
+            - `True`: Always release GIL (best for multi-threaded applications)
+            - `False`: Never release GIL (best for single-threaded, small data)
 
         Returns
         -------
         output_data : ndarray
             Resampled input data.
       )mydelimiter",
-           "input"_a, "ratio"_a, "end_of_input"_a = false)
+           "input"_a, "ratio"_a, "end_of_input"_a = false, "release_gil"_a = py::none())
       .def("reset", &sr::Resampler::reset, "Reset internal state.")
       .def("set_ratio", &sr::Resampler::set_ratio,
            "Set a new conversion ratio immediately.")
@@ -670,6 +699,11 @@ PYBIND11_MODULE(samplerate, m) {
             ----------
             num_frames : int
                 Number of frames to read.
+            release_gil : bool, str, or None
+                Controls GIL release during resampling for multi-threading:
+                - `None` or `"auto"` (default): Release GIL only for large data (>= 1000 frames)
+                - `True`: Always release GIL (best for multi-threaded applications)
+                - `False`: Never release GIL (best for single-threaded, small data)
 
             Returns
             -------
@@ -678,7 +712,7 @@ PYBIND11_MODULE(samplerate, m) {
                 (`num_output_frames`,) array. Note that this may return fewer frames
                 than requested, for example when no more input is available.
            )mydelimiter",
-           "num_frames"_a)
+           "num_frames"_a, "release_gil"_a = py::none())
       .def("reset", &sr::CallbackResampler::reset, "Reset state.")
       .def("set_starting_ratio", &sr::CallbackResampler::set_starting_ratio,
            "Set the starting conversion ratio for the next `read` call.")
