@@ -54,9 +54,47 @@ assert np.allclose(output_data_simple, output_data_full)
 
 # See `samplerate.CallbackResampler` for the Callback API, or
 # `examples/play_modulation.py` for an example.
+
+# Callback API Example
+def producer():
+    # Generate data in chunks
+    for i in range(10):
+        yield np.random.uniform(-1, 1, 1024).astype(np.float32)
+    yield None # Signal end of stream
+
+data_iter = producer()
+callback = lambda: next(data_iter)
+
+resampler = samplerate.CallbackResampler(callback, ratio, converter)
+output_chunks = []
+while True:
+    # Read chunks of resampled data
+    chunk = resampler.read(512) 
+    if chunk.shape[0] == 0:
+        break
+    output_chunks.append(chunk)
 ```
 
-See `samplerate.resample`, `samplerate.Resampler`, and `samplerate.CallbackResampler` in the API documentation for details.
+## Performance Tips
+
+To get the maximum performance from `samplerate`:
+
+1.  **Use `np.float32`**: The underlying `libsamplerate` library operates on 32-bit floats. Passing `np.float64` (default numpy float) or integer arrays triggers an implicit copy and cast, which can be expensive.
+    ```python
+    # Fast (no copy)
+    data = np.zeros(1000, dtype=np.float32)
+    samplerate.resample(data, 1.5)
+
+    # Slower (implicit copy + cast)
+    data = np.zeros(1000, dtype=np.float64) 
+    samplerate.resample(data, 1.5)
+    ```
+2.  **Use C-Contiguous Arrays**: Ensure your input arrays are C-contiguous (row-major). Non-contiguous arrays (e.g., column slices) will also trigger a copy.
+3.  **Adjust GIL Threshold**: If you are processing many small chunks in a multi-threaded application, the default "auto" GIL release threshold (1000 frames) might be too high or too low. You can tune it:
+    ```python
+    # Release GIL even for small chunks (e.g. > 100 frames)
+    samplerate.set_gil_release_threshold(100)
+    ```
 
 ## Multi-threading and GIL Control
 
@@ -67,6 +105,7 @@ import samplerate
 
 # Default: "auto" mode - releases GIL only for large data (>= 1000 frames)
 # Balances single-threaded performance with multi-threading capability
+# The threshold is configurable: samplerate.set_gil_release_threshold(2000)
 output = samplerate.resample(input_data, ratio)
 
 # Force GIL release - best for multi-threaded applications
