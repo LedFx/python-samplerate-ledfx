@@ -40,6 +40,35 @@
 #define VERSION_INFO "nightly"
 #endif
 
+// Build information defaults (set by CMake)
+#ifndef BUILD_TYPE
+#define BUILD_TYPE "unknown"
+#endif
+#ifndef COMPILER_ID
+#define COMPILER_ID "unknown"
+#endif
+#ifndef COMPILER_VERSION
+#define COMPILER_VERSION "unknown"
+#endif
+#ifndef CMAKE_VERSION
+#define CMAKE_VERSION "unknown"
+#endif
+#ifndef TARGET_ARCH
+#define TARGET_ARCH "unknown"
+#endif
+#ifndef TARGET_OS
+#define TARGET_OS "unknown"
+#endif
+#ifndef PYBIND11_VERSION_INFO
+#define PYBIND11_VERSION_INFO "unknown"
+#endif
+#ifndef LIBSAMPLERATE_VERSION
+#define LIBSAMPLERATE_VERSION "unknown"
+#endif
+#ifndef LTO_ENABLED
+#define LTO_ENABLED 0
+#endif
+
 // This value was empirically and somewhat arbitrarily chosen; increase it for further safety.
 #define END_OF_INPUT_EXTRA_OUTPUT_FRAMES 10000
 
@@ -51,7 +80,7 @@
 // with multi-threaded performance (allowing parallelism for large data).
 // Empirically chosen based on benchmarks showing that at 1000 frames, the GIL
 // overhead is < 1% of total execution time for even the fastest converter types.
-#define GIL_RELEASE_THRESHOLD_FRAMES 1000
+long gil_release_threshold_frames = 1000;
 
 namespace py = pybind11;
 using namespace pybind11::literals;
@@ -72,13 +101,13 @@ namespace samplerate {
 bool should_release_gil(const py::object &release_gil, long num_frames) {
   if (release_gil.is_none()) {
     // "auto" mode: release GIL only for large data sizes
-    return num_frames >= GIL_RELEASE_THRESHOLD_FRAMES;
+    return num_frames >= gil_release_threshold_frames;
   } else if (py::isinstance<py::bool_>(release_gil)) {
     return release_gil.cast<bool>();
   } else if (py::isinstance<py::str>(release_gil)) {
     std::string s = release_gil.cast<std::string>();
     if (s == "auto") {
-      return num_frames >= GIL_RELEASE_THRESHOLD_FRAMES;
+      return num_frames >= gil_release_threshold_frames;
     }
     throw std::domain_error("Invalid release_gil value. Use True, False, None, or 'auto'.");
   }
@@ -177,7 +206,7 @@ class Resampler {
   ~Resampler() { src_delete(_state); }  // src_delete handles nullptr case
 
   py::array_t<float, py::array::c_style> process(
-      py::array_t<float, py::array::c_style | py::array::forcecast> input,
+      const py::array_t<float, py::array::c_style | py::array::forcecast> &input,
       double sr_ratio, bool end_of_input,
       const py::object &release_gil = py::none()) {
     // accessors for the arrays
@@ -213,7 +242,7 @@ class Resampler {
     SRC_DATA src_data = {
         static_cast<float *>(inbuf.ptr),   // data_in
         static_cast<float *>(outbuf.ptr),  // data_out
-        inbuf.shape[0],                    // input_frames
+        static_cast<long>(inbuf.shape[0]), // input_frames
         long(new_size),                    // output_frames
         0,             // input_frames_used, filled by libsamplerate
         0,             // output_frames_gen, filled by libsamplerate
@@ -505,7 +534,7 @@ py::array_t<float, py::array::c_style> resample(
   SRC_DATA src_data = {
       static_cast<float *>(inbuf.ptr),   // data_in
       static_cast<float *>(outbuf.ptr),  // data_out
-      inbuf.shape[0],                    // input_frames
+      static_cast<long>(inbuf.shape[0]), // input_frames
       long(new_size),                    // output_frames
       0,        // input_frames_used, filled by libsamplerate
       0,        // output_frames_gen, filled by libsamplerate
@@ -558,6 +587,78 @@ PYBIND11_MODULE(samplerate, m) {
                                                                // docstring
   m.attr("__version__") = VERSION_INFO;
   m.attr("__libsamplerate_version__") = LIBSAMPLERATE_VERSION;
+
+  m.def("set_gil_release_threshold", [](long threshold) {
+    gil_release_threshold_frames = threshold;
+  }, "Set the minimum number of frames required to release the GIL in 'auto' mode.");
+
+  m.def("get_gil_release_threshold", []() {
+    return gil_release_threshold_frames;
+  }, "Get the minimum number of frames required to release the GIL in 'auto' mode.");
+
+  m.def("get_build_info", []() {
+    py::dict info;
+    info["version"] = VERSION_INFO;
+    info["libsamplerate_version"] = LIBSAMPLERATE_VERSION;
+    info["build_type"] = BUILD_TYPE;
+    info["compiler_id"] = COMPILER_ID;
+    info["compiler_version"] = COMPILER_VERSION;
+    info["cmake_version"] = CMAKE_VERSION;
+    info["target_arch"] = TARGET_ARCH;
+    info["target_os"] = TARGET_OS;
+    info["pybind11_version"] = PYBIND11_VERSION_INFO;
+    // C++ standard - MSVC uses _MSVC_LANG instead of __cplusplus
+#ifdef _MSVC_LANG
+    #define CPP_STD_VALUE _MSVC_LANG
+#else
+    #define CPP_STD_VALUE __cplusplus
+#endif
+#if CPP_STD_VALUE >= 202002L
+    info["cpp_standard"] = "C++20";
+#elif CPP_STD_VALUE >= 201703L
+    info["cpp_standard"] = "C++17";
+#elif CPP_STD_VALUE >= 201402L
+    info["cpp_standard"] = "C++14";
+#elif CPP_STD_VALUE >= 201103L
+    info["cpp_standard"] = "C++11";
+#else
+    info["cpp_standard"] = "pre-C++11";
+#endif
+#undef CPP_STD_VALUE
+    // LTO status (passed from CMake)
+#if LTO_ENABLED
+    info["lto_enabled"] = true;
+#else
+    info["lto_enabled"] = false;
+#endif
+    // Pointer size (32 vs 64 bit)
+    info["pointer_size_bits"] = sizeof(void*) * 8;
+    // Float size sanity check
+    info["float_size_bytes"] = sizeof(float);
+    info["gil_release_threshold"] = gil_release_threshold_frames;
+    return info;
+  }, R"doc(
+Get detailed build information for debugging purposes.
+
+Returns
+-------
+dict
+    Dictionary containing:
+    - version: Package version
+    - libsamplerate_version: libsamplerate library version
+    - build_type: Build configuration (Release, Debug, etc.)
+    - compiler_id: Compiler used (MSVC, GNU, Clang, etc.)
+    - compiler_version: Compiler version string
+    - cmake_version: CMake version used for build
+    - target_arch: Target architecture (x86_64, arm64, etc.)
+    - target_os: Target operating system
+    - pybind11_version: pybind11 version
+    - cpp_standard: C++ standard used
+    - lto_enabled: Whether Link Time Optimization was enabled
+    - pointer_size_bits: Pointer size (32 or 64)
+    - float_size_bytes: Size of float type (should be 4)
+    - gil_release_threshold: Current GIL release threshold
+)doc");
 
   auto m_exceptions = m.def_submodule(
       "exceptions", "Sub-module containing sampling exceptions");

@@ -51,3 +51,11 @@ build-frontend = "build[uv]"
 build = ["cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp313-*","cp314-*"]
 # Skip 32-bit builds and musllinux wheels
 skip = ["*-win32", "*-manylinux_i686", "*-musllinux*"]
+
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" }, 
+  { file = "setup.py" },
+  { file = "CMakeLists.txt" },
+  { dir = "external" },
+  { dir = "src" }]
