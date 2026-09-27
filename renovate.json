@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>LedFx/renovate-config"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Vendored C/C++ deps pinned by commit in external/CMakeLists.txt. The match runs on to the matching set(*_VERSION ...) line so both copies of the version are bumped together.",
+      "managerFilePatterns": ["/^external/CMakeLists\\.txt$/"],
+      "matchStrings": [
+        "GIT_REPOSITORY https://github\\.com/(?<depName>[\\w.-]+/[\\w.-]+)\\s+GIT_TAG (?<currentDigest>[0-9a-f]{40}) # (?<currentValue>\\S+)[\\s\\S]*?set\\(\\w+_VERSION\\w* \"?\\S+?\"? CACHE"
+      ],
+      "datasourceTemplate": "github-tags",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "C/C++ deps change the compiled wheel; a person reads the diff.",
+      "matchManagers": ["custom.regex"],
+      "automerge": false
+    }
+  ]
+}
