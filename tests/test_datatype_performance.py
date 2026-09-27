@@ -1,6 +1,11 @@
 import time
 import numpy as np
+import pytest
 import samplerate
+
+# Timing benchmarks: shared CI runners make them flaky, so CI runs
+# pytest -m "not perf". Run them locally with plain pytest.
+pytestmark = pytest.mark.perf
 
 def benchmark_resample(input_data, ratio=1.5, converter='sinc_fastest'):
     start_time = time.perf_counter()

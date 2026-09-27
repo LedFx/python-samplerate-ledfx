@@ -82,7 +82,7 @@ jobs:
         run: |
           uv venv
           uv pip install dist/*.whl --group test
-          uv run --no-project pytest tests
+          uv run --no-project pytest tests -m "not perf"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -118,7 +118,7 @@ jobs:
       - name: Test
         run: |
           uv run --no-project python -c "import numpy; print('numpy', numpy.__version__)"
-          uv run --no-project pytest tests
+          uv run --no-project pytest tests -m "not perf"
 
   # Early warning: NumPy's nightly builds on the newest CPython. Not a release
   # gate; it only runs on the schedule or by hand.
@@ -151,7 +151,7 @@ jobs:
       - name: Test
         run: |
           uv run --no-sync python -c "import numpy; print('numpy', numpy.__version__)"
-          uv run --no-sync pytest tests
+          uv run --no-sync pytest tests -m "not perf"
 
   publish:
     name: Publish to PyPI

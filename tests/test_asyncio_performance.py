@@ -23,6 +23,10 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 import samplerate
 
+# Timing benchmarks: shared CI runners make them flaky, so CI runs
+# pytest -m "not perf". Run them locally with plain pytest.
+pytestmark = pytest.mark.perf
+
 
 def is_arm_mac():
     """Check if running on ARM-based macOS (Apple Silicon)."""

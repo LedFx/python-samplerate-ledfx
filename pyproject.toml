@@ -48,11 +48,16 @@ test = [
 [tool.setuptools.dynamic]
 readme = {file = "README.md", content-type = "text/markdown"}
 
+[tool.pytest.ini_options]
+markers = [
+  "perf: timing benchmarks; flaky on shared CI runners, so CI deselects them with -m 'not perf'",
+]
+
 [tool.setuptools_scm]
 
 [tool.cibuildwheel]
 test-groups = ["test"]
-test-command = "pytest {project}/tests"
+test-command = "pytest {project}/tests -m \"not perf\""
 build-frontend = "build[uv]"
 build = ["cp311-*", "cp312-*", "cp313-*", "cp314-*"]
 # Skip 32-bit builds and musllinux wheels
