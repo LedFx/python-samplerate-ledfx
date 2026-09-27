@@ -60,8 +60,9 @@ These live in GitHub, not in this repo. Renovate's automerge relies on them:
   PRs immediately) but Dependabot security updates off, so each advisory
   gets one PR. Secret scanning and push protection on, private
   vulnerability reporting on.
-- Renovate skips forks that have no config, so `renovate.json` must stay on
-  `main`. Its runs are on the Mend dashboard (developer.mend.io).
+- Renovate skips forks unless `renovate.json` on `main` sets
+  `"forkProcessing": "enabled"`. Its runs are on the Mend dashboard
+  (developer.mend.io).
 - Issues enabled, for Renovate's Dependency Dashboard and bug reports.
 
 ## Supported versions
