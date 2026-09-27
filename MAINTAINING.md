@@ -57,8 +57,11 @@ These live in GitHub, not in this repo. Renovate's automerge relies on them:
 - `pypi` environment: deploys from `v*` tags only.
 - Actions: workflow token is read-only by default and can't approve PRs.
 - Security: Dependabot alerts on (Renovate reads them to raise `[SECURITY]`
-  PRs immediately), secret scanning and push protection on, private
+  PRs immediately) but Dependabot security updates off, so each advisory
+  gets one PR. Secret scanning and push protection on, private
   vulnerability reporting on.
+- Renovate skips forks that have no config, so `renovate.json` must stay on
+  `main`. Its runs are on the Mend dashboard (developer.mend.io).
 - Issues enabled, for Renovate's Dependency Dashboard and bug reports.
 
 ## Supported versions
