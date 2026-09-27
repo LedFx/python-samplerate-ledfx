@@ -48,13 +48,22 @@ through trusted publishing from the `pypi` environment, with attestations.
 
 ## Repository settings
 
-These live in GitHub, not in this repo. Check them when anything changes:
+These live in GitHub, not in this repo. Renovate's automerge relies on them:
 
-- Branch ruleset on `main`: PRs required, required checks = the wheel builds,
-  sdist and zizmor jobs. Renovate's automerge relies on these being required.
-- `pypi` environment: tag-only deployment, required reviewer.
-- Actions → default workflow permissions: read-only.
+- Ruleset `main`: changes go through PRs (no approval needed), no force pushes
+  or deletion, and these checks must pass (from GitHub Actions only): the five
+  wheel builds, the sdist build, the oldest-NumPy test and zizmor. Repo admins
+  can bypass it on a PR. Rename a job and you must update the ruleset too.
+- `pypi` environment: deploys from `v*` tags only.
+- Actions: workflow token is read-only by default and can't approve PRs.
 - Security: Dependabot alerts on (Renovate reads them to raise `[SECURITY]`
   PRs immediately), secret scanning and push protection on, private
   vulnerability reporting on.
 - Issues enabled, for Renovate's Dependency Dashboard and bug reports.
+
+## Supported versions
+
+CPython 3.11–3.14 and NumPy >= 1.23.2. When a CPython version reaches end of
+life, drop it from `requires-python` and `[tool.cibuildwheel] build`, and raise
+the NumPy floor to the first release with wheels for the new oldest Python;
+the `numpy_oldest` CI job reads the floor from pyproject.toml.

@@ -3,9 +3,7 @@ name: zizmor
 on:
   push:
     branches: [main]
-    paths: [".github/**"]
   pull_request:
-    paths: [".github/**"]
   schedule:
     - cron: "17 4 * * 1" # new audits land in zizmor over time
   workflow_dispatch:

@@ -10,7 +10,7 @@ authors=[
 {"name" = "Robin Scheibler", "email" ="fakufaku@gmail.com"},
 {"name" = "Tino Wagner", "email" ="ich@tinowagner.com"}
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 classifiers=[
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -23,8 +23,7 @@ classifiers=[
 ]
 keywords=["samplerate", "converter", "signal processing", "audio"]
 dependencies = [
-    "numpy>=1.7.0",
-
+    "numpy>=1.23.2", # first release with CPython 3.11 wheels; tested in CI
 ]
 
 [dependency-groups]
@@ -36,7 +35,7 @@ test = [
   "pytest",
   "pytest-asyncio",
   "uvloop>=0.16.0; sys_platform != \"win32\"",
-  "winloop>=0.3.1; sys_platform == \"win32\" and python_version >= \"3.9\"",
+  "winloop>=0.3.1; sys_platform == \"win32\"",
 ]
 
 [tool.setuptools.dynamic]
@@ -48,7 +47,7 @@ readme = {file = "README.md", content-type = "text/markdown"}
 test-groups = ["test"]
 test-command = "pytest {project}/tests"
 build-frontend = "build[uv]"
-build = ["cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp313-*","cp314-*"]
+build = ["cp311-*", "cp312-*", "cp313-*", "cp314-*"]
 # Skip 32-bit builds and musllinux wheels
 skip = ["*-win32", "*-manylinux_i686", "*-musllinux*"]
 

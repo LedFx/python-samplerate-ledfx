@@ -90,6 +90,36 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  # Keep the NumPy floor in pyproject.toml honest: oldest supported Python
+  # with the oldest allowed NumPy.
+  numpy_oldest:
+    name: Test oldest supported NumPy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: "3.11"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Build and install with the oldest NumPy
+        run: |
+          uv venv
+          floor=$(sed -n 's/.*"numpy>=\([0-9.]*\)".*/\1/p' pyproject.toml)
+          uv pip install . --group test "numpy==$floor"
+
+      - name: Test
+        run: |
+          uv run --no-project python -c "import numpy; print('numpy', numpy.__version__)"
+          uv run --no-project pytest tests
+
   # Early warning: NumPy's nightly builds on the newest CPython. Not a release
   # gate; it only runs on the schedule or by hand.
   numpy_nightly:
