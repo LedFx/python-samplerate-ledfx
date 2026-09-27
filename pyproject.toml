@@ -64,9 +64,6 @@ build = ["cp311-*", "cp312-*", "cp313-*", "cp314-*"]
 skip = ["*-win32", "*-manylinux_i686", "*-musllinux*"]
 
 [tool.uv]
-# 0.12.12 is the first release that also keeps files uploaded after the
-# exclude-newer cutoff out of uv.lock. Renovate and setup-uv both read this.
-required-version = ">=0.12.12"
 # Match Renovate's 14-day minimumReleaseAge (LedFx/renovate-config), including
 # for lock file maintenance, which Renovate does not delay. For an urgent
 # security fix newer than this, add exclude-newer-package = { name = false }.
