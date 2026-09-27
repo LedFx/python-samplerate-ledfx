@@ -6,10 +6,10 @@ set(PYBIND11_FINDPYTHON ON CACHE BOOL "Use FindPython instead of FindPythonInter
 FetchContent_Declare(
   pybind11
   GIT_REPOSITORY https://github.com/pybind/pybind11
-  GIT_TAG f5fbe867d2d26e4a0a9177a51f6e568868ad3dc8 # 3.0.1
+  GIT_TAG 97bf890db679505a14dfe547a5e77bb2bd05dc90 # 3.1.0
 )
 ## Change this if you update pybind11 version
-set(PYBIND11_VERSION_INFO "3.0.1" CACHE STRING "pybind11 version")  # <-- update pybind11 version here
+set(PYBIND11_VERSION_INFO "3.1.0" CACHE STRING "pybind11 version")  # <-- update pybind11 version here
 
 
 FetchContent_MakeAvailable(pybind11)
