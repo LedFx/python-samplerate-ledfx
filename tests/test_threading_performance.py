@@ -55,6 +55,7 @@ def _callback_resampler_work(data, ratio, converter_type, channels, results, ind
     return output
 
 
+@pytest.mark.perf
 @pytest.mark.parametrize("num_threads", [2, 4, 6, 8])
 @pytest.mark.parametrize("converter_type", ["sinc_fastest", "sinc_medium", "sinc_best"])
 def test_resample_gil_release_parallel(num_threads, converter_type):
@@ -119,6 +120,7 @@ def test_resample_gil_release_parallel(num_threads, converter_type):
         print(f"  ✓ Performance meets expectations ({expected_speedup}x)")
 
 
+@pytest.mark.perf
 @pytest.mark.parametrize("num_threads", [2, 4, 6, 8])
 @pytest.mark.parametrize("converter_type", ["sinc_fastest", "sinc_medium", "sinc_best"])
 def test_resampler_process_gil_release_parallel(num_threads, converter_type):
@@ -175,6 +177,7 @@ def test_resampler_process_gil_release_parallel(num_threads, converter_type):
         print(f"  ✓ Performance meets expectations ({expected_speedup}x)")
 
 
+@pytest.mark.perf
 @pytest.mark.parametrize("num_threads", [2, 4, 6, 8])
 @pytest.mark.parametrize("converter_type", ["sinc_fastest", "sinc_medium", "sinc_best"])
 def test_callback_resampler_gil_release_parallel(num_threads, converter_type):
@@ -275,6 +278,7 @@ def test_gil_release_quality():
     assert np.allclose(results[0], results[1])
 
 
+@pytest.mark.perf
 def test_conditional_gil_release_small_data():
     """Test that small data sizes perform well without GIL release overhead.
     
@@ -310,6 +314,7 @@ def test_conditional_gil_release_small_data():
         assert per_call_us > 0
 
 
+@pytest.mark.perf
 def test_conditional_gil_release_large_data_threading():
     """Test that large data sizes still benefit from GIL release for threading.
     
@@ -430,6 +435,7 @@ def test_release_gil_parameter_invalid():
     print("\n  Invalid release_gil parameter test passed!")
 
 
+@pytest.mark.perf
 def test_gil_metrics_report():
     """Generate a detailed performance report for GIL release optimization."""
     print("\n" + "="*70)
