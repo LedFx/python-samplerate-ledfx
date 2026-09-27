@@ -1,3 +1,4 @@
+import gc
 import numpy as np
 import pytest
 import samplerate
@@ -33,3 +34,15 @@ def test_process_after_ratio_change():
     x = np.random.rand(200_000).astype(np.float32)
     y = resampler.process(x, 0.25, end_of_input=True)
     assert len(y) > len(x) * 0.25
+
+
+def test_callback_resampler_clone_outlives_original():
+    x = np.arange(4096, dtype=np.float32)
+    original = samplerate.CallbackResampler(lambda: x.copy(), 1.0, "linear")
+    original.read(100)  # libsamplerate now points into original's buffer
+    clone = original.clone()
+    del original
+    gc.collect()
+    junk = [np.full(4096, -1.0, np.float32) for _ in range(200)]  # reuse freed memory
+    y = clone.read(1000)
+    assert y.min() >= 0

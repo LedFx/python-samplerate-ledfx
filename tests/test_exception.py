@@ -121,3 +121,15 @@ def test_callback_resampler_callback_raises():
     cb_resampler = samplerate.CallbackResampler(callback, 0.5, "sinc_fastest", 1)
     with pytest.raises(KeyError, match="raised in callback"):
         cb_resampler.read(100)
+
+
+def test_callback_resampler_reentrant_read_raises():
+    # The guard that stops two threads driving one resampler while the GIL is
+    # released; re-entering from the callback triggers it deterministically.
+    def callback():
+        cb_resampler.read(10)
+        return np.ones(256, dtype=np.float32)
+
+    cb_resampler = samplerate.CallbackResampler(callback, 1.0, "linear", 1)
+    with pytest.raises(RuntimeError, match="already in use"):
+        cb_resampler.read(10)
