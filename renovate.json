@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>LedFx/renovate-config"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Vendored C/C++ deps pinned by commit in external/CMakeLists.txt. The match runs on to the matching set(*_VERSION ...) line so both copies of the version are bumped together.",
+      "managerFilePatterns": [
+        "/^external/CMakeLists\\.txt$/"
+      ],
+      "matchStrings": [
+        "GIT_REPOSITORY https://github\\.com/(?<depName>[\\w.-]+/[\\w.-]+)\\s+GIT_TAG (?<currentDigest>[0-9a-f]{40}) # (?<currentValue>\\S+)[\\s\\S]*?set\\(\\w+_VERSION\\w* \"?\\S+?\"? CACHE"
+      ],
+      "datasourceTemplate": "github-tags",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Last-reviewed upstream fork commit. A bump PR means upstream moved: review it (see MAINTAINING.md).",
+      "managerFilePatterns": [
+        "/^MAINTAINING\\.md$/"
+      ],
+      "matchStrings": [
+        "upstream: (?<packageName>https://github\\.com/\\S+) (?<currentValue>\\S+)@(?<currentDigest>[0-9a-f]{40})"
+      ],
+      "depNameTemplate": "upstream python-samplerate",
+      "datasourceTemplate": "git-refs"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "C/C++ deps change the compiled wheel, and upstream bumps need porting; a person reads these.",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Upstream commits carry no release timestamp; the preset's release-age wait would hold this forever.",
+      "matchDepNames": [
+        "upstream python-samplerate"
+      ],
+      "minimumReleaseAge": null
+    }
+  ]
+}
