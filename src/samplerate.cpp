@@ -30,10 +30,13 @@
 #include <pybind11/stl.h>
 #include <samplerate.h>
 
+#include <algorithm>
 #include <cmath>
+#include <exception>
 #include <iostream>
 #include <string>
 #include <typeinfo>
+#include <utility>
 #include <vector>
 
 #ifndef VERSION_INFO
@@ -69,8 +72,15 @@
 #define LTO_ENABLED 0
 #endif
 
-// This value was empirically and somewhat arbitrarily chosen; increase it for further safety.
-#define END_OF_INPUT_EXTRA_OUTPUT_FRAMES 10000
+// Output frames allocated on top of ceil(input_frames * ratio).
+//
+// A call can generate more than that: with end_of_input the converter flushes
+// the input it holds back (about ratio x its filter half-length, e.g. 144 input
+// frames for sinc_best, so up to ~37k output frames at ratio 256), and after a
+// ratio change libsamplerate ramps from the previous ratio, which has no fixed
+// bound. Resampler.process() therefore grows the buffer whenever libsamplerate
+// fills it, and this value only trades a little memory for fewer regrowths.
+constexpr size_t OUTPUT_HEADROOM_FRAMES = 1024;
 
 // Minimum number of input frames before releasing the GIL during resampling
 // when using automatic GIL management. Releasing and re-acquiring the GIL has
@@ -222,60 +232,62 @@ class Resampler {
     if (channels != _channels || channels == 0)
       throw std::domain_error("Invalid number of channels in input data.");
 
-    // Add a "fudge factor" to the size. This is because the actual number of
-    // output samples generated on the last call when input is terminated can
-    // be more than the expected number of output samples during mid-stream
-    // steady-state processing. (Also, when the stream is started, the number
-    // of output samples generated will generally be zero or otherwise less
-    // than the number of samples in mid-stream processing.)
-    const auto new_size =
-        static_cast<size_t>(std::ceil(inbuf.shape[0] * sr_ratio))
-        + END_OF_INPUT_EXTRA_OUTPUT_FRAMES;
+    const auto in_frames = static_cast<size_t>(inbuf.shape[0]);
+    const auto *in_ptr = static_cast<const float *>(inbuf.ptr);
+    size_t capacity = static_cast<size_t>(std::ceil(in_frames * sr_ratio)) +
+                      OUTPUT_HEADROOM_FRAMES;
+    const bool release = should_release_gil(release_gil, inbuf.shape[0]);
 
     // allocate output array
-    std::vector<size_t> out_shape{new_size};
+    std::vector<size_t> out_shape{capacity};
     if (inbuf.ndim == 2) out_shape.push_back(static_cast<size_t>(channels));
     auto output = py::array_t<float, py::array::c_style>(out_shape);
-    py::buffer_info outbuf = output.request();
 
-    // libsamplerate struct
-    SRC_DATA src_data = {
-        static_cast<float *>(inbuf.ptr),   // data_in
-        static_cast<float *>(outbuf.ptr),  // data_out
-        static_cast<long>(inbuf.shape[0]), // input_frames
-        long(new_size),                    // output_frames
-        0,             // input_frames_used, filled by libsamplerate
-        0,             // output_frames_gen, filled by libsamplerate
-        end_of_input,  // end_of_input, not used by src_simple ?
-        sr_ratio       // src_ratio, sampling rate conversion ratio
-    };
+    size_t frames_used = 0;
+    size_t frames_gen = 0;
+    while (true) {
+      // libsamplerate struct
+      SRC_DATA src_data = {
+          in_ptr + frames_used * channels,                // data_in
+          output.mutable_data() + frames_gen * channels,  // data_out
+          long(in_frames - frames_used),                  // input_frames
+          long(capacity - frames_gen),                    // output_frames
+          0,             // input_frames_used, filled by libsamplerate
+          0,             // output_frames_gen, filled by libsamplerate
+          end_of_input,  // end_of_input
+          sr_ratio       // src_ratio, sampling rate conversion ratio
+      };
 
-    // Perform resampling with optional GIL release
-    auto do_resample = [&]() {
-      return src_process(_state, &src_data);
-    };
+      int err_code;
+      if (release) {
+        py::gil_scoped_release release_guard;
+        err_code = src_process(_state, &src_data);
+      } else {
+        err_code = src_process(_state, &src_data);
+      }
+      error_handler(err_code);
 
-    int err_code;
-    if (should_release_gil(release_gil, inbuf.shape[0])) {
-      py::gil_scoped_release release;
-      err_code = do_resample();
-    } else {
-      err_code = do_resample();
+      frames_used += src_data.input_frames_used;
+      frames_gen += src_data.output_frames_gen;
+
+      // libsamplerate stops short of a full buffer only once it has used all
+      // the input (and, with end_of_input, flushed what it held back).
+      if (frames_gen < capacity) break;
+
+      // Buffer full: there may be more output. Grow it and carry on rather
+      // than dropping the input libsamplerate has not used yet.
+      capacity *= 2;
+      out_shape[0] = capacity;
+      auto larger = py::array_t<float, py::array::c_style>(out_shape);
+      std::copy_n(output.data(), frames_gen * channels, larger.mutable_data());
+      output = larger;
     }
-    long output_frames_gen = src_data.output_frames_gen;
-    error_handler(err_code);
 
     // create a shorter view of the array
-    if ((size_t)output_frames_gen < new_size) {
-      out_shape[0] = output_frames_gen;
-      return py::array_t<float, py::array::c_style>(
-          out_shape, outbuf.strides, static_cast<float *>(outbuf.ptr), output);
-    } else if ((size_t)output_frames_gen >= new_size) {
-      // This means our fudge factor is too small.
-      throw std::runtime_error("Generated more output samples than expected!");
-    }
-
-    return output;
+    out_shape[0] = frames_gen;
+    py::buffer_info outbuf = output.request();
+    return py::array_t<float, py::array::c_style>(
+        out_shape, outbuf.strides, static_cast<float *>(outbuf.ptr), output);
   }
 
   void set_ratio(double new_ratio) {
@@ -299,7 +311,7 @@ class CallbackResampler {
   callback_t _callback = nullptr;
   np_array_f32 _current_buffer;
   size_t _buffer_ndim = 0;
-  std::string _callback_error_msg = "";
+  std::exception_ptr _callback_error;
 
  public:
   double _ratio = 0.0;
@@ -348,7 +360,7 @@ class CallbackResampler {
         _callback(r._callback),
         _current_buffer(std::move(r._current_buffer)),
         _buffer_ndim(r._buffer_ndim),
-        _callback_error_msg(std::move(r._callback_error_msg)),
+        _callback_error(std::move(r._callback_error)),
         _ratio(r._ratio),
         _converter_type(r._converter_type),
         _channels(r._channels) {
@@ -364,11 +376,7 @@ class CallbackResampler {
 
   void set_buffer(const np_array_f32 &new_buf) { _current_buffer = new_buf; }
   size_t get_channels() { return _channels; }
-  void set_callback_error(const std::string &error_msg) {
-    _callback_error_msg = error_msg;
-  }
-  std::string get_callback_error() const { return _callback_error_msg; }
-  void clear_callback_error() { _callback_error_msg = ""; }
+  void set_callback_error(std::exception_ptr e) { _callback_error = e; }
 
   np_array_f32 callback(void) {
     auto input = _callback();
@@ -388,9 +396,6 @@ class CallbackResampler {
     py::buffer_info outbuf = output.request();
 
     if (_state == nullptr) _create();
-
-    // clear any previous callback error
-    clear_callback_error();
 
     // Perform callback resampling with optional GIL release.
     // Note: the_callback_func will acquire GIL when calling Python callback.
@@ -413,11 +418,10 @@ class CallbackResampler {
       err_code = result.second;
     }
 
-    // check if callback had an error
-    std::string callback_error = get_callback_error();
-    if (!callback_error.empty()) {
-      throw std::domain_error(callback_error);
-    }
+    // re-raise anything the callback raised, now that we are out of
+    // libsamplerate's C code
+    if (_callback_error)
+      std::rethrow_exception(std::exchange(_callback_error, nullptr));
 
     // check error status
     if (output_frames_gen == 0) {
@@ -466,38 +470,38 @@ long the_callback_func(void *cb_data, float **data) {
   CallbackResampler *cb = static_cast<CallbackResampler *>(cb_data);
   int cb_channels = cb->get_channels();
 
-  py::buffer_info inbuf;
-  {
-    py::gil_scoped_acquire acquire;
+  // read() may release the GIL around src_callback_read(). Hold it for the
+  // whole callback: inbuf's destructor releases a Python buffer too.
+  py::gil_scoped_acquire acquire;
 
+  // Exceptions must not unwind through libsamplerate's C frames. Store them,
+  // return 0 (no more input) and let read() re-raise.
+  try {
     // get the data as a numpy array
-    auto input = cb->callback();
-    inbuf = input.request();
-  }
+    py::buffer_info inbuf = cb->callback().request();
 
-  // end of stream is signaled by a None, which is cast to a ndarray with ndim
-  // == 0
-  if (inbuf.ndim == 0) return 0;
+    // end of stream is signaled by a None, which is cast to a ndarray with
+    // ndim == 0
+    if (inbuf.ndim == 0) return 0;
 
-  // set the number of channels
-  int channels = 1;
-  if (inbuf.ndim == 2)
-    channels = inbuf.shape[1];
-  else if (inbuf.ndim > 2) {
-    // Cannot throw exception in C callback - store error and return 0
-    cb->set_callback_error("Input array should have at most 2 dimensions");
+    // set the number of channels
+    int channels = 1;
+    if (inbuf.ndim == 2)
+      channels = inbuf.shape[1];
+    else if (inbuf.ndim > 2)
+      throw std::domain_error("Input array should have at most 2 dimensions");
+
+    if (channels != cb_channels || channels == 0)
+      throw std::domain_error("Invalid number of channels in input data.");
+
+    // the array stays alive in cb->_current_buffer until the next callback
+    *data = static_cast<float *>(inbuf.ptr);
+
+    return (long)inbuf.shape[0];
+  } catch (...) {
+    cb->set_callback_error(std::current_exception());
     return 0;
   }
-
-  if (channels != cb_channels || channels == 0) {
-    // Cannot throw exception in C callback - store error and return 0
-    cb->set_callback_error("Invalid number of channels in input data.");
-    return 0;
-  }
-
-  *data = static_cast<float *>(inbuf.ptr);
-
-  return (long)inbuf.shape[0];
 }
 
 }  // namespace
@@ -507,7 +511,6 @@ py::array_t<float, py::array::c_style> resample(
     double sr_ratio, const py::object &converter_type, bool verbose,
     const py::object &release_gil = py::none()) {
   // input array has shape (n_samples, n_channels)
-  int converter_type_int = get_converter_type(converter_type);
 
   // accessors for the arrays
   py::buffer_info inbuf = input.request();
@@ -522,62 +525,16 @@ py::array_t<float, py::array::c_style> resample(
   if (channels == 0)
     throw std::domain_error("Invalid number of channels (0) in input data.");
 
-  // Add buffer space to match Resampler.process() behavior with end_of_input=True
-  // src_simple internally behaves like end_of_input=True, so it may generate
-  // extra samples from buffer flushing, especially for certain converters
-  const auto new_size =
-      static_cast<size_t>(std::ceil(inbuf.shape[0] * sr_ratio))
-      + END_OF_INPUT_EXTRA_OUTPUT_FRAMES;
-
-  // allocate output array
-  std::vector<size_t> out_shape{new_size};
-  if (inbuf.ndim == 2) out_shape.push_back(static_cast<size_t>(channels));
-  auto output = py::array_t<float, py::array::c_style>(out_shape);
-  py::buffer_info outbuf = output.request();
-
-  // libsamplerate struct
-  SRC_DATA src_data = {
-      static_cast<float *>(inbuf.ptr),   // data_in
-      static_cast<float *>(outbuf.ptr),  // data_out
-      static_cast<long>(inbuf.shape[0]), // input_frames
-      long(new_size),                    // output_frames
-      0,        // input_frames_used, filled by libsamplerate
-      0,        // output_frames_gen, filled by libsamplerate
-      0,        // end_of_input, not used by src_simple ?
-      sr_ratio  // src_ratio, sampling rate conversion ratio
-  };
-
-  // Perform resampling with optional GIL release
-  auto do_resample = [&]() {
-    return src_simple(&src_data, converter_type_int, channels);
-  };
-
-  int err_code;
-  if (should_release_gil(release_gil, inbuf.shape[0])) {
-    py::gil_scoped_release release;
-    err_code = do_resample();
-  } else {
-    err_code = do_resample();
-  }
-  long output_frames_gen = src_data.output_frames_gen;
-  long input_frames_used = src_data.input_frames_used;
-  error_handler(err_code);
-
-  // create a shorter view of the array
-  if ((size_t)output_frames_gen < new_size) {
-    out_shape[0] = output_frames_gen;
-    auto base = output;
-    output = py::array_t<float, py::array::c_style>(
-        out_shape, outbuf.strides, static_cast<float *>(outbuf.ptr), base);
-  } else if ((size_t)output_frames_gen >= new_size) {
-    // This means our fudge factor is too small.
-    throw std::runtime_error("Generated more output samples than expected!");
-  }
+  // src_simple() is src_new() + one src_process() with end_of_input +
+  // src_delete(), but cannot continue when the output buffer is full.
+  // Resampler.process() does the same and grows the buffer instead.
+  auto output = Resampler(converter_type, channels)
+                    .process(input, sr_ratio, /*end_of_input=*/true, release_gil);
 
   if (verbose) {
     py::print("samplerate info:");
-    py::print(input_frames_used, " input frames used");
-    py::print(output_frames_gen, " output frames generated");
+    py::print(inbuf.shape[0], " input frames used");
+    py::print(output.shape(0), " output frames generated");
   }
 
   return output;

@@ -112,3 +112,12 @@ def test_callback_resampler_zero_channels():
     with pytest.raises(ValueError):
         # fails because we defined the converter for 1 channel
         cb_resampler.read(len(data))
+
+
+def test_callback_resampler_callback_raises():
+    def callback():
+        raise KeyError("raised in callback")
+
+    cb_resampler = samplerate.CallbackResampler(callback, 0.5, "sinc_fastest", 1)
+    with pytest.raises(KeyError, match="raised in callback"):
+        cb_resampler.read(100)
