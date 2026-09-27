@@ -124,6 +124,8 @@ resampler = samplerate.Resampler('sinc_best', channels=1)
 output = resampler.process(input_data, ratio, release_gil=True)
 ```
 
+Thread safety: separate `Resampler` / `CallbackResampler` objects can run in parallel threads. A single object holds stream state, so using it from two threads at once raises `RuntimeError` rather than corrupting that state. While the GIL is released, the input array is read without it: don't modify it from another thread during the call.
+
 ## See also
 
 -   [scikits.samplerate](https://pypi.python.org/pypi/scikits.samplerate) implements only the Simple API and uses [Cython](http://cython.org/) for extern calls. The resample function of scikits.samplerate and this package share the same function signature for compatiblity.

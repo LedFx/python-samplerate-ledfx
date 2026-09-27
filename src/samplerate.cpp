@@ -31,6 +31,7 @@
 #include <samplerate.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <exception>
 #include <iostream>
@@ -178,9 +179,31 @@ void error_handler(int errnum) {
   }
 }
 
+// Resamplers release the GIL while libsamplerate runs, so two Python threads
+// could otherwise drive the same SRC_STATE at once (or free it mid-call).
+// Concurrent use of one stateful resampler is a caller bug; raise instead of
+// corrupting state. A mutex could deadlock: the holder needs the GIL to grow
+// the output buffer, and a waiter may be holding it.
+class InUseGuard {
+ public:
+  explicit InUseGuard(std::atomic<bool> &flag) : _flag(flag) {
+    if (_flag.exchange(true))
+      throw std::runtime_error(
+          "resampler is already in use by another thread (or re-entered "
+          "from its own callback)");
+  }
+  ~InUseGuard() { _flag = false; }
+  InUseGuard(const InUseGuard &) = delete;
+  InUseGuard &operator=(const InUseGuard &) = delete;
+
+ private:
+  std::atomic<bool> &_flag;
+};
+
 class Resampler {
  private:
   SRC_STATE *_state = nullptr;
+  mutable std::atomic<bool> _in_use{false};
 
  public:
   int _converter_type = 0;
@@ -198,6 +221,7 @@ class Resampler {
   // copy constructor
   Resampler(const Resampler &r)
       : _converter_type(r._converter_type), _channels(r._channels) {
+    InUseGuard guard(r._in_use);
     int _err_num = 0;
     _state = src_clone(r._state, &_err_num);
     error_handler(_err_num);
@@ -219,6 +243,8 @@ class Resampler {
       const py::array_t<float, py::array::c_style | py::array::forcecast> &input,
       double sr_ratio, bool end_of_input,
       const py::object &release_gil = py::none()) {
+    InUseGuard guard(_in_use);
+
     // accessors for the arrays
     py::buffer_info inbuf = input.request();
 
@@ -291,17 +317,26 @@ class Resampler {
   }
 
   void set_ratio(double new_ratio) {
+    InUseGuard guard(_in_use);
     error_handler(src_set_ratio(_state, new_ratio));
   }
 
-  void reset() { error_handler(src_reset(_state)); }
+  void reset() {
+    InUseGuard guard(_in_use);
+    error_handler(src_reset(_state));
+  }
 
   Resampler clone() const { return Resampler(*this); }
 };
 
+class CallbackResampler;
+
 namespace {
 
 long the_callback_func(void *cb_data, float **data);
+
+// The CallbackResampler whose read() is running on this thread.
+thread_local CallbackResampler *active_reader = nullptr;
 
 }  // namespace
 
@@ -312,6 +347,7 @@ class CallbackResampler {
   np_array_f32 _current_buffer;
   size_t _buffer_ndim = 0;
   std::exception_ptr _callback_error;
+  mutable std::atomic<bool> _in_use{false};
 
  public:
   double _ratio = 0.0;
@@ -321,8 +357,10 @@ class CallbackResampler {
  private:
   void _create() {
     int _err_num = 0;
+    // No callback data: src_clone() copies it, so a clone would call back into
+    // the original. the_callback_func uses active_reader instead.
     _state = src_callback_new(the_callback_func, _converter_type, (int)_channels,
-                              &_err_num, static_cast<void *>(this));
+                              &_err_num, nullptr);
     if (_state == nullptr) error_handler(_err_num);
   }
 
@@ -346,9 +384,14 @@ class CallbackResampler {
   // copy constructor
   CallbackResampler(const CallbackResampler &r)
       : _callback(r._callback),
+        // libsamplerate keeps reading the last callback buffer across read()
+        // calls, and the cloned state points into it too: keep it alive.
+        _current_buffer(r._current_buffer),
+        _buffer_ndim(r._buffer_ndim),
         _ratio(r._ratio),
         _converter_type(r._converter_type),
         _channels(r._channels) {
+    InUseGuard guard(r._in_use);
     int _err_num = 0;
     _state = src_clone(r._state, &_err_num);
     if (_state == nullptr) error_handler(_err_num);
@@ -390,6 +433,8 @@ class CallbackResampler {
 
   py::array_t<float, py::array::c_style> read(
       size_t frames, const py::object &release_gil = py::none()) {
+    InUseGuard guard(_in_use);
+
     // allocate output array
     std::vector<size_t> out_shape{frames, _channels};
     auto output = py::array_t<float, py::array::c_style>(out_shape);
@@ -399,9 +444,13 @@ class CallbackResampler {
 
     // Perform callback resampling with optional GIL release.
     // Note: the_callback_func will acquire GIL when calling Python callback.
+    // src_callback_read() calls the_callback_func on this thread; tell it
+    // which resampler is reading (restored afterwards, for nested reads).
     auto do_callback_read = [&]() {
+      auto *outer = std::exchange(active_reader, this);
       size_t gen = src_callback_read(_state, _ratio, (long)frames,
                                      static_cast<float *>(outbuf.ptr));
+      active_reader = outer;
       return std::make_pair(gen, gen == 0 ? src_error(_state) : 0);
     };
 
@@ -450,24 +499,29 @@ class CallbackResampler {
   }
 
   void set_starting_ratio(double new_ratio) {
+    InUseGuard guard(_in_use);
     error_handler(src_set_ratio(_state, new_ratio));
     _ratio = new_ratio;
   }
 
-  void reset() { error_handler(src_reset(_state)); }
+  void reset() {
+    InUseGuard guard(_in_use);
+    error_handler(src_reset(_state));
+  }
 
   CallbackResampler clone() const { return CallbackResampler(*this); }
   CallbackResampler &__enter__() { return *this; }
   void __exit__(const py::object &/*exc_type*/, const py::object &/*exc*/,
                 const py::object &/*exc_tb*/) {
+    InUseGuard guard(_in_use);
     _destroy();
   }
 };
 
 namespace {
 
-long the_callback_func(void *cb_data, float **data) {
-  CallbackResampler *cb = static_cast<CallbackResampler *>(cb_data);
+long the_callback_func(void * /*cb_data*/, float **data) {
+  CallbackResampler *cb = active_reader;
   int cb_channels = cb->get_channels();
 
   // read() may release the GIL around src_callback_read(). Hold it for the
