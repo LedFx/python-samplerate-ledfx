@@ -64,6 +64,10 @@ build = ["cp311-*", "cp312-*", "cp313-*", "cp314-*"]
 skip = ["*-win32", "*-manylinux_i686", "*-musllinux*"]
 
 [tool.uv]
+# Match Renovate's 14-day minimumReleaseAge (LedFx/renovate-config), including
+# for lock file maintenance, which Renovate does not delay. For an urgent
+# security fix newer than this, add exclude-newer-package = { name = false }.
+exclude-newer = "14 days"
 cache-keys = [
   { file = "pyproject.toml" }, 
   { file = "setup.py" },
