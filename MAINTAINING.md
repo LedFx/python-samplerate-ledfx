@@ -132,5 +132,7 @@ CPython 3.11–3.15 and NumPy >= 1.23.2. When a CPython version reaches end of
 life, drop it from `requires-python`, the classifiers and `[tool.cibuildwheel]
 build`, and raise the NumPy floor to the first release with wheels for the new
 oldest Python; the `numpy_oldest` CI job reads the floor from pyproject.toml.
-When winloop publishes cp315 wheels, drop the `python_version < "3.15"` marker
-on it in the test group.
+The tests depend on nothing that needs a wheel per Python beyond NumPy, so a
+new CPython only waits for NumPy. uvloop and winloop were dropped: the asyncio
+perf tests measure GIL release in executor threads, which no event loop
+changes.

@@ -53,9 +53,6 @@ dev = [
 test = [
   "pytest",
   "pytest-asyncio",
-  "uvloop>=0.16.0; sys_platform != \"win32\"",
-  # No cp315 wheels yet; the asyncio tests skip winloop when it is missing.
-  "winloop>=0.3.1; sys_platform == \"win32\" and python_version < \"3.15\"",
 ]
 
 [tool.setuptools.dynamic]
