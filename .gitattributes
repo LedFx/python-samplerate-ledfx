@@ -1,1 +1,2 @@
-samplerate/_version.py export-subst
+# git apply needs the vendored patches byte-for-byte, so never convert line endings.
+*.patch -text

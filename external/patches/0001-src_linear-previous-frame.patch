@@ -1,0 +1,35 @@
+libsamplerate PR #235 (https://github.com/libsndfile/libsamplerate/pull/235),
+unmerged upstream. Fixes issue #234 (also #208; PR #209 is a larger rewrite
+of the same fix).
+
+The linear converter's main loop interpolates from the previous input frame.
+When the first src_process() call gets a single input frame, the pre-roll
+loop produces nothing and the main loop reads data_in[-channels]: a heap
+read before the caller's buffer (confirmed with AddressSanitizer, also by
+PR #209's vari_streaming_test). Use last_value there, as the pre-roll does.
+Drop this file once libsamplerate includes the fix.
+
+diff --git a/src/src_linear.c b/src/src_linear.c
+index 43a0fd4..8a014a8 100644
+--- a/src/src_linear.c
++++ b/src/src_linear.c
+@@ -119,8 +119,17 @@ linear_vari_process (SRC_STATE *state, SRC_DATA *data)
+ #endif
+ 
+ 		for (ch = 0 ; ch < state->channels ; ch++)
+-		{	data->data_out [priv->out_gen] = (float) (data->data_in [priv->in_used - state->channels + ch] + input_index *
+-						((double) data->data_in [priv->in_used + ch] - data->data_in [priv->in_used - state->channels + ch])) ;
++		{	/* The main loop interpolates between the previous input frame and the
++			 * current one.  On the first call priv->in_used can still be 0 here (the
++			 * pre-roll loop above produced no output when only a single input frame
++			 * was passed), so there is no previous frame to read and
++			 * data_in [in_used - channels + ch] is a negative index.  Fall back to
++			 * last_value, exactly as the pre-roll loop does. */
++			const float prev = (priv->in_used >= state->channels)
++				? data->data_in [priv->in_used - state->channels + ch]
++				: priv->last_value [ch] ;
++			data->data_out [priv->out_gen] = (float) (prev + input_index *
++							((double) data->data_in [priv->in_used + ch] - prev)) ;
+ 			priv->out_gen ++ ;
+ 			} ;
+ 

@@ -28,6 +28,9 @@ FetchContent_Declare(
   libsamplerate
   GIT_REPOSITORY https://github.com/libsndfile/libsamplerate
   GIT_TAG ${LIBSAMPLERATE_COMMIT}
+  # Fixes from upstream PRs that are not merged yet; see each patch's header.
+  PATCH_COMMAND ${CMAKE_COMMAND} -DPATCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/patches
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/apply_patches.cmake
 )
 string(SUBSTRING "${LIBSAMPLERATE_COMMIT}" 0 7 _libsamplerate_short)
 set(LIBSAMPLERATE_VERSION "0.2.2+git.${_libsamplerate_short}" CACHE STRING "libsamplerate version" FORCE)

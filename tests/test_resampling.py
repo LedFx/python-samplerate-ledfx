@@ -142,3 +142,21 @@ def test_resample_many_channels(converter_type, num_channels):
     )
     assert output.shape == expected.shape
     np.testing.assert_array_equal(output, expected)
+
+
+@pytest.mark.parametrize("num_channels", [1, 2])
+def test_linear_single_first_frame_stays_in_bounds(num_channels):
+    # libsamplerate's linear converter read the frame *before* the input
+    # buffer when its first call got one frame (libsamplerate#234, patched in
+    # external/patches). Put a sentinel there: the input is a view one frame
+    # into a larger array, so the read lands on it instead of other memory.
+    backing = np.full((2, num_channels), 1e6, dtype=np.float32)
+    backing[1] = 0.5
+    frame = backing[1:]
+    if num_channels == 1:
+        frame = frame[:, 0]
+    assert not frame.flags.owndata  # a view: no copy hides the read
+
+    resampler = samplerate.Resampler("linear", num_channels)
+    output = resampler.process(frame, 1.5)
+    np.testing.assert_array_equal(output, np.full_like(output, 0.5))
