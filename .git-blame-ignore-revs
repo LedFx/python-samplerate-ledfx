@@ -1,0 +1,5 @@
+# Formatting-only commits; `git blame` skips them (GitHub does too).
+# Locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply ruff and the prek whitespace fixes
+909dd92a37f77bbffe116f881da87afd09790624

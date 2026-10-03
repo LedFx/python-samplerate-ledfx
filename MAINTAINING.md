@@ -8,11 +8,46 @@ projects, pinned by commit in [`external/CMakeLists.txt`](external/CMakeLists.tx
 
 | What | How | Who acts |
 | --- | --- | --- |
-| GitHub Actions, uv.lock, Python deps | Renovate, from the org preset `github>LedFx/renovate-config`. Non-majors automerge on green CI after 14 days; majors wait 30 days and need a person. | Renovate; majors reviewed by a maintainer |
-| pybind11, libsamplerate | Renovate regex manager on `external/CMakeLists.txt`. Never automerged: they change the compiled wheel. | Maintainer reviews |
+| GitHub Actions, uv.lock, Python deps, prek hooks | Renovate, from the org preset `github>LedFx/renovate-config`. Non-majors automerge on green CI after 14 days; majors wait 30 days and need a person. | Renovate; majors reviewed by a maintainer |
+| pybind11 | Renovate regex manager on `external/CMakeLists.txt` (release tags). Never automerged: it changes the compiled wheel. | Maintainer reviews |
+| libsamplerate | Tracks `master` by commit (see below); Renovate bumps the commit. Never automerged. | Maintainer reviews |
 | Upstream fork | Renovate bumps the marker below when `tuxu/python-samplerate` moves. The PR is the prompt to review upstream. | Maintainer reviews |
 | New NumPy / Python releases | Weekly scheduled CI builds and tests every wheel against the newest NumPy, plus NumPy nightly on the newest CPython. | Whoever sees the red run |
-| Workflow security | zizmor on every change to `.github/` and weekly. | CI |
+| Lint and workflow security | prek (ruff, actionlint, zizmor, ...) on every PR and weekly; autofix.ci pushes what it can fix. | CI, autofix.ci |
+| Releases | release-please keeps a release PR open. | Maintainer merges it |
+
+## libsamplerate
+
+Its newest release, 0.2.2, is from 2021. We build `master`, which adds SSE2
+`lrint()` on x86-64 and CMake fixes (output is bit-identical to 0.2.2), and
+the module reports it as `0.2.2+git.<commit>`. Move back to a tag once a
+release has these.
+
+Fixes from unmerged upstream PRs live in [`external/patches/`](external/patches),
+applied in order by FetchContent's patch step
+([`external/apply_patches.cmake`](external/apply_patches.cmake)). Each patch
+starts with why it is there; delete it once upstream has the fix. If a
+libsamplerate bump makes a patch fail to apply, the build fails: check
+whether upstream merged it (delete it) or moved the code (refresh it).
+
+| Patch | Upstream | Why |
+| --- | --- | --- |
+| `0001-src_linear-previous-frame.patch` | PR #235 (issues #234, #208; PR #209 is the same fix, larger) | The linear converter read before the input buffer when its first call got one frame. |
+
+Upstream issues worked around in `src/samplerate.cpp` instead:
+
+- #206: output length depends on the channel count, so `resample()` splits
+  more than 128 channels into equal-width groups.
+- #223: channel counts < 1 are rejected before libsamplerate asserts.
+- The sinc converters' 128-channel limit is reported as "Channel count must
+  be >= 1."; the wrapper says what is wrong.
+- NaN passes libsamplerate's ratio check; the wrapper checks ratios itself.
+
+Last reviewed 2026-10 and not patched: #221 (a ratio change needs two input
+frames to take effect, linear converter), #84 (signed shifts; every
+supported compiler shifts arithmetically), build issues for platforms we do
+not ship, docs, and PRs for build options, CI, Android, NEON (WIP) and
+threading.
 
 ## Syncing upstream
 
@@ -36,25 +71,51 @@ the marker bump in the same PR as the ports, or on its own if nothing applies.
 History of what was taken:
 
 - `06e88d1` (#36) resize → view: ported, with a fix for a use-after-free in
-  upstream's mono `CallbackResampler.read` path.
+  upstream's mono `CallbackResampler.read` path (upstream issue #41).
 - `6d68220` (#34) `Python_EXECUTABLE`: ported.
 - `96eb024` `-fPIC`, `235d720` py3.8 drop: already here.
 - `855b93b`, `40e7810` upstream CI/twine: not applicable.
+- 2026-10 review: no new upstream commits; its other branches are merged or
+  stale. From its open issues: #40 (more than 128 channels) and #20
+  (`CMAKE_ARGS` with spaces) fixed here; #41 and #7 (input frames dropped)
+  already fixed here; #8 (integers are cast, not scaled) documented in the
+  README; #26 (`out=` buffer) and #24 (system libsamplerate) are features,
+  not taken.
 
 ## Releasing
 
-Tag `vX.Y.Z` on `main`. CI builds wheels and the sdist, then publishes to PyPI
-through trusted publishing from the `pypi` environment, with attestations.
+PR titles must be [Conventional Commits](https://www.conventionalcommits.org/)
+(the `Conventional PR title` check): PRs are squash-merged with the title as
+the commit message, and release-please builds the version and changelog from
+those. `feat` bumps the minor version, `fix`/`perf` the patch version, `!`
+marks a breaking change.
+
+1. release-please keeps a `chore(main): release X.Y.Z` PR open with the
+   version bump (pyproject.toml, uv.lock) and CHANGELOG.md. Edit its notes
+   in the PR if needed.
+2. Merge it. release-please tags `vX.Y.Z` and creates a draft GitHub release.
+3. The tag runs CI: it builds and tests every wheel and the sdist, publishes
+   to PyPI through trusted publishing (with attestations) from the `pypi`
+   environment, then attaches the files to the draft release and publishes it.
+
+To retry a failed release, re-run the failed jobs of the tag's CI run. The
+plan job refuses a tag that does not match the version in pyproject.toml.
 
 ## Repository settings
 
 These live in GitHub, not in this repo. Renovate's automerge relies on them:
 
 - Ruleset `main`: changes go through PRs (no approval needed), no force pushes
-  or deletion, and these checks must pass (from GitHub Actions only): the five
-  wheel builds, the sdist build, the oldest-NumPy test and zizmor. Repo admins
-  can bypass it on a PR. Rename a job and you must update the ruleset too.
-- `pypi` environment: deploys from `v*` tags only.
+  or deletion, and the required checks (from GitHub Actions only) are
+  `CI passed` and `Conventional PR title`. Repo admins can bypass it on a PR.
+  Never rename `CI passed`; add new gating jobs to its `needs` instead.
+- Merges: squash only, with the PR title as the commit message.
+- `pypi` environment: deploys from `v*` tags only. PyPI's trusted publisher
+  names this environment and `ci.yml`.
+- Org secrets `AUTOMATION_APP_CLIENT_ID` / `AUTOMATION_APP_PRIVATE_KEY`
+  (the ledfx-automation app) available to this repo, and the app installed
+  on it: release-please.yml, pr-title.yml and lint-notify.yml mint its token.
+- The autofix.ci app installed on this repo.
 - Actions: workflow token is read-only by default and can't approve PRs.
 - Security: Dependabot alerts on (Renovate reads them to raise `[SECURITY]`
   PRs immediately) but Dependabot security updates off, so each advisory
@@ -67,7 +128,9 @@ These live in GitHub, not in this repo. Renovate's automerge relies on them:
 
 ## Supported versions
 
-CPython 3.11–3.14 and NumPy >= 1.23.2. When a CPython version reaches end of
-life, drop it from `requires-python` and `[tool.cibuildwheel] build`, and raise
-the NumPy floor to the first release with wheels for the new oldest Python;
-the `numpy_oldest` CI job reads the floor from pyproject.toml.
+CPython 3.11–3.15 and NumPy >= 1.23.2. When a CPython version reaches end of
+life, drop it from `requires-python`, the classifiers and `[tool.cibuildwheel]
+build`, and raise the NumPy floor to the first release with wheels for the new
+oldest Python; the `numpy_oldest` CI job reads the floor from pyproject.toml.
+When winloop publishes cp315 wheels, drop the `python_version < "3.15"` marker
+on it in the test group.
