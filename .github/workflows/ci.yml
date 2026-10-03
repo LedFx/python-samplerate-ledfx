@@ -1,4 +1,4 @@
-name: samplerate
+name: CI
 
 on:
   push:
@@ -6,7 +6,8 @@ on:
     tags: ["v*"]
   pull_request:
   # Weekly run: wheel tests install the newest NumPy/pytest, so this catches
-  # dependency drift (e.g. the NumPy 2.4 resize break) between releases.
+  # dependency drift (e.g. the NumPy 2.4 resize break) between releases, and
+  # new zizmor audits through the lint job.
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch:
@@ -15,12 +16,96 @@ permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel main or tag runs: tags publish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Decides what a run needs, here rather than with paths-ignore: a workflow
+  # skipped by paths-ignore never reports, so the required "CI passed" check
+  # would wait forever. Skipped jobs count as passed. Pushes, tags, schedules
+  # and manual runs always run everything.
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # lists the PR's changed files
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      version: ${{ steps.plan.outputs.version }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: pyproject.toml
+          sparse-checkout-cone-mode: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          # PR-controlled on PR runs; it ends up in outputs and release names.
+          if [[ ! "$version" =~ ^[0-9][0-9A-Za-z.+-]*$ ]]; then
+            echo "::error::Unexpected version string in pyproject.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # The one guard for every publish path.
+          if [[ "$REF" == refs/tags/v* && "$REF" != "refs/tags/v$version" ]]; then
+            echo "::error::Tag ${REF#refs/tags/} does not match pyproject.toml version $version"
+            exit 1
+          fi
+          # Only a tag push releases; re-run failed jobs to retry a release.
+          if [[ "$EVENT" == push && "$REF" == refs/tags/v* ]]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+          build=true
+          if [ -n "$PR" ]; then
+            # previous_filename: a file moved out of src/ is still a code change
+            files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')
+            # Repo metadata (workflows other than this one, bot config, prose)
+            # is checked by lint (actionlint, zizmor); there is nothing to build.
+            # here-string, not a pipe: grep -q exiting early + pipefail would read as "no match"
+            meta='^(\.github/|docs/|renovate\.json$|release-please-config\.json$|\.release-please-manifest\.json$|\.pre-commit-config\.yaml$|\.gitignore$|\.git-blame-ignore-revs$|[^/]+\.(md|rst)$)'
+            if ! grep -qx '.github/workflows/ci.yml' <<< "$files"; then
+              grep -qvE "$meta" <<< "$files" || build=false
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+  # Fast lint gate before any build spend: the prek hook set contributors run
+  # locally (`uv run prek run --all-files`), zizmor and actionlint included.
+  # autofix.ci runs in parallel and pushes fixes; its push re-runs this.
+  lint:
+    name: Lint (prek)
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - run: uv run --frozen --only-group dev prek run --all-files --show-diff-on-failure
+
   build_wheels:
     name: Build wheels on ${{ matrix.os }}
+    needs: [plan, lint]
+    if: needs.plan.outputs.build == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     permissions:
       contents: read
     strategy:
@@ -59,14 +144,16 @@ jobs:
 
   build_sdist:
     name: Build and test source distribution
+    needs: [plan, lint]
+    if: needs.plan.outputs.build == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0 # setuptools-scm needs tags for the version
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -78,11 +165,14 @@ jobs:
       - name: Build sdist and a wheel from it
         run: uv build
 
+      # Tests from the unpacked sdist, so they must ship in it too.
       - name: Test the wheel built from the sdist
         run: |
           uv venv
           uv pip install dist/*.whl --group test
-          uv run --no-project pytest tests -m "not perf"
+          mkdir sdist
+          tar -xzf dist/*.tar.gz -C sdist --strip-components=1
+          uv run --no-project pytest sdist/tests -m "not perf"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -94,7 +184,10 @@ jobs:
   # with the oldest allowed NumPy.
   numpy_oldest:
     name: Test oldest supported NumPy
+    needs: [plan, lint]
+    if: needs.plan.outputs.build == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
@@ -121,18 +214,18 @@ jobs:
           uv run --no-project pytest tests -m "not perf"
 
   # Early warning: NumPy's nightly builds on the newest CPython. Not a release
-  # gate; it only runs on the schedule or by hand.
+  # gate; it only runs on the schedule or by hand, and stays out of CI passed.
   numpy_nightly:
     name: Test against NumPy nightly
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -140,7 +233,7 @@ jobs:
           enable-cache: false
 
       - name: Build and install
-        run: uv sync --python 3.14 --group test
+        run: uv sync --python 3.15 --group test
 
       - name: Install NumPy nightly
         run: >
@@ -153,16 +246,33 @@ jobs:
           uv run --no-sync python -c "import numpy; print('numpy', numpy.__version__)"
           uv run --no-sync pytest tests -m "not perf"
 
+  # The one check branch protection requires. Every gating job belongs in
+  # needs; its name must never change.
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [plan, lint, build_wheels, build_sdist, numpy_oldest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+
+  # Release: tag v<version> only (release-please.yml creates it). Each job only
+  # downloads the tested artifacts and publishes them.
   publish:
     name: Publish to PyPI
-    needs: [build_wheels, build_sdist]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [plan, ci-passed]
+    if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/p/samplerate-ledfx/
     permissions:
-      id-token: write # Required for trusted publishing
+      id-token: write # Trusted Publishing
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -177,3 +287,34 @@ jobs:
       # Uses trusted publishing and uploads PEP 740 attestations for each file.
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  # After PyPI, so the GitHub release never points at a version pip can't get.
+  # Attaches the published files to release-please's draft and publishes it;
+  # a tag pushed by hand (no draft) gets a release with generated notes.
+  github-release:
+    name: Publish GitHub release
+    needs: [plan, publish]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+    permissions:
+      contents: write # uploads assets to the release and publishes it
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          pattern: cibw-*
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: v${{ needs.plan.outputs.version }}
+        run: |
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$REPO" --clobber
+            gh release edit "$TAG" --repo "$REPO" --draft=false
+          else
+            gh release create "$TAG" dist/* --repo "$REPO" --verify-tag --generate-notes
+          fi

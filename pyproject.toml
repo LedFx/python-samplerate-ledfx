@@ -1,10 +1,12 @@
 [build-system]
-requires = ["setuptools>=80", "setuptools-scm>=8", "cmake"]
+requires = ["setuptools>=80", "cmake"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name="samplerate-ledfx"
-dynamic = ["version","readme"]
+# Bumped by release-please (release-please-config.json); do not edit by hand.
+version = "0.3.0"
+dynamic = ["readme"]
 description="Monolithic python wrapper for libsamplerate based on pybind11 and NumPy"
 authors=[
 {"name" = "LedFx"},
@@ -42,7 +44,11 @@ Upstream = "https://github.com/tuxu/python-samplerate"
 [dependency-groups]
 dev = [
     "setuptools>=80",
-    "setuptools-scm>=8",
+    # Lint tools, run by prek (.pre-commit-config.yaml) from this lock.
+    "prek>=0.5.3",
+    "ruff==0.16.8",
+    "actionlint-py==1.7.12.24",
+    "shellcheck-py==0.11.0.1",
 ]
 test = [
   "pytest",
@@ -60,8 +66,6 @@ markers = [
   "perf: timing benchmarks; flaky on shared CI runners, so CI deselects them with -m 'not perf'",
 ]
 
-[tool.setuptools_scm]
-
 [tool.cibuildwheel]
 test-groups = ["test"]
 test-command = "pytest {project}/tests -m \"not perf\""
@@ -76,8 +80,13 @@ skip = ["*-win32", "*-manylinux_i686", "*-musllinux*"]
 # security fix newer than this, add exclude-newer-package = { name = false }.
 exclude-newer = "14 days"
 cache-keys = [
-  { file = "pyproject.toml" }, 
+  { file = "pyproject.toml" },
   { file = "setup.py" },
   { file = "CMakeLists.txt" },
   { dir = "external" },
-  { dir = "src" }]
+  { dir = "src" },
+]
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["docs/conf.py"]
