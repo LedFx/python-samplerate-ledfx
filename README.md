@@ -160,8 +160,9 @@ releases, dependency updates, the libsamplerate patches and upstream syncs.
 ## See also
 
 - [scikits.samplerate](https://pypi.org/project/scikits.samplerate/) implements
-  only the Simple API, with Cython. Its `resample` function has the same
-  signature as this package's.
+  only the Simple API, with Cython. Positional calls to its `resample`
+  (`resample(input, ratio, "sinc_best")`) work unchanged here, but its keyword
+  names differ (`r` and `type` rather than `ratio` and `converter_type`).
 - [resampy](https://github.com/bmcfee/resampy): sample rate conversion in
   Python and Cython.
 
