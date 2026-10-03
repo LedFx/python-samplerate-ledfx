@@ -16,7 +16,22 @@ projects, pinned by commit in [`external/CMakeLists.txt`](external/CMakeLists.tx
 | Lint and workflow security | prek (ruff, actionlint, zizmor, ...) on every PR and weekly; autofix.ci pushes what it can fix. | CI, autofix.ci |
 | Releases | release-please keeps a release PR open. | Maintainer merges it |
 
-## libsamplerate
+## What CI runs
+
+The Plan job in `ci.yml` reads the files a PR (or a push to `main`) changes
+and runs only what they can break:
+
+| Change | Runs |
+| --- | --- |
+| Prose only: `*.md`, `*.rst` at the top level, `docs/` | Nothing (CI passed is green) |
+| Repo metadata: other workflows, `renovate.json`, release-please and prek config, `examples/` | Lint |
+| `tests/` or `uv.lock` | Lint, tests on Linux (Python 3.11 and 3.15), oldest NumPy |
+| Anything else, including `src/`, `external/`, build files, `pyproject.toml`, new paths, or `ci.yml` itself | Everything: every wheel, the sdist, oldest NumPy |
+
+Tags, the weekly schedule and manual runs always run everything. When you add
+a file that needs no build, extend the patterns in the plan step; unknown
+paths deliberately run everything.
+
 
 Its newest release, 0.2.2, is from 2021. We build `master`, which adds SSE2
 `lrint()` on x86-64 and CMake fixes (output is bit-identical to 0.2.2), and

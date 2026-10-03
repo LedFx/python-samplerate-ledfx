@@ -22,8 +22,16 @@ concurrency:
 jobs:
   # Decides what a run needs, here rather than with paths-ignore: a workflow
   # skipped by paths-ignore never reports, so the required "CI passed" check
-  # would wait forever. Skipped jobs count as passed. Pushes, tags, schedules
-  # and manual runs always run everything.
+  # would wait forever. Skipped jobs count as passed.
+  #
+  # From the files a PR (or a push to main) changes, by what they can break:
+  #   prose only (README, docs)      -> nothing runs
+  #   repo metadata (other workflows, bot/lint config, examples)
+  #                                  -> lint (actionlint, zizmor, ...)
+  #   tests/ or uv.lock              -> lint, quick Linux tests, oldest NumPy
+  #   anything else (src/, external/, build files, pyproject.toml, unknown
+  #   paths, or this workflow)       -> everything, every wheel
+  # Tags, the weekly schedule and manual runs always run everything.
   plan:
     name: Plan
     runs-on: ubuntu-latest
@@ -32,7 +40,9 @@ jobs:
       contents: read
       pull-requests: read # lists the PR's changed files
     outputs:
-      build: ${{ steps.plan.outputs.build }}
+      code: ${{ steps.plan.outputs.code }} # lint
+      tests: ${{ steps.plan.outputs.tests }} # tests without building wheels
+      build: ${{ steps.plan.outputs.build }} # every wheel and the sdist
       version: ${{ steps.plan.outputs.version }}
       release: ${{ steps.plan.outputs.release }}
     steps:
@@ -48,6 +58,8 @@ jobs:
           REPO: ${{ github.repository }}
           REF: ${{ github.ref }}
           EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
         run: |
           version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           # PR-controlled on PR runs; it ends up in outputs and release names.
@@ -67,19 +79,36 @@ jobs:
           else
             echo "release=false" >> "$GITHUB_OUTPUT"
           fi
-          build=true
+
+          # previous_filename: a file moved out of src/ is still a code change.
+          # Plain assignments, so a failed API call fails this step (bash -e)
+          # and with it CI passed, rather than reading as "nothing changed".
+          files=""
           if [ -n "$PR" ]; then
-            # previous_filename: a file moved out of src/ is still a code change
             files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')
-            # Repo metadata (workflows other than this one, bot config, prose)
-            # is checked by lint (actionlint, zizmor); there is nothing to build.
-            # here-string, not a pipe: grep -q exiting early + pipefail would read as "no match"
-            meta='^(\.github/|docs/|renovate\.json$|release-please-config\.json$|\.release-please-manifest\.json$|\.pre-commit-config\.yaml$|\.gitignore$|\.git-blame-ignore-revs$|[^/]+\.(md|rst)$)'
-            if ! grep -qx '.github/workflows/ci.yml' <<< "$files"; then
-              grep -qvE "$meta" <<< "$files" || build=false
+          elif [[ "$EVENT" == push && "$REF" == refs/heads/main && ! "$BEFORE" =~ ^0+$ ]]; then
+            compare=$(gh api "repos/$REPO/compare/$BEFORE...$AFTER")
+            # The compare API lists at most 300 files: past that, run everything.
+            if [ "$(jq '.files | length' <<< "$compare")" -lt 300 ]; then
+              files=$(jq -r '.files[] | .filename, (.previous_filename // empty)' <<< "$compare")
             fi
           fi
-          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+          code=true tests=true build=true
+          if [ -n "$files" ] && ! grep -qx '.github/workflows/ci.yml' <<< "$files"; then
+            prose='^(docs/|[^/]+\.(md|rst)$)'
+            meta='^(docs/|[^/]+\.(md|rst)$|\.github/|examples/|renovate\.json$|release-please-config\.json$|\.release-please-manifest\.json$|\.pre-commit-config\.yaml$|\.gitignore$|\.git-blame-ignore-revs$|\.python-version$)'
+            # here-strings, not pipes: grep -q exiting early + pipefail would read as "no match"
+            grep -qvE "$prose" <<< "$files" || code=false
+            grep -qvE "$meta" <<< "$files" || tests=false
+            grep -qvE "$meta|^tests/|^uv\.lock$" <<< "$files" || build=false
+          fi
+          {
+            echo "code=$code"
+            echo "tests=$tests"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Plan: code=$code tests=$tests build=$build" >> "$GITHUB_STEP_SUMMARY"
 
   # Fast lint gate before any build spend: the prek hook set contributors run
   # locally (`uv run prek run --all-files`), zizmor and actionlint included.
@@ -87,6 +116,7 @@ jobs:
   lint:
     name: Lint (prek)
     needs: plan
+    if: needs.plan.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -180,12 +210,44 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  # Tests-only and lock-only changes cannot change the compiled wheels: build
+  # once from source on the oldest and newest Python instead of every wheel.
+  test_linux:
+    name: Test (Linux, py${{ matrix.python }})
+    needs: [plan, lint]
+    if: needs.plan.outputs.tests == 'true' && needs.plan.outputs.build != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.15"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Build and install
+        env:
+          PYTHON: ${{ matrix.python }}
+        run: uv sync --locked --python "$PYTHON" --group test
+
+      - name: Test
+        run: uv run --no-sync pytest tests -m "not perf"
+
   # Keep the NumPy floor in pyproject.toml honest: oldest supported Python
   # with the oldest allowed NumPy.
   numpy_oldest:
     name: Test oldest supported NumPy
     needs: [plan, lint]
-    if: needs.plan.outputs.build == 'true'
+    if: needs.plan.outputs.tests == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -251,7 +313,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: always()
-    needs: [plan, lint, build_wheels, build_sdist, numpy_oldest]
+    needs: [plan, lint, build_wheels, build_sdist, test_linux, numpy_oldest]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

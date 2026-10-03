@@ -1,48 +1,62 @@
-# python-samplerate-ledfx
-> **Note:** This is a fork of the original [python-samplerate](https://github.com/tuxu/python-samplerate) maintained by the [LedFx](https://github.com/LedFx) team.
->
-> **Why this fork exists:**
-> - The original python-samplerate project is sporadically active
-> - We need current Python support (3.11–3.15) with pre-built wheels on PyPI
-> - We require the latest fixes and improvements from the main branch of python-samplerate
-> - LedFx depends on python-samplerate and needs a reliable, up-to-date release
->
-> All credit for python-samplerate goes to the original authors. This fork exists solely to provide maintained releases for projects that depend on python-samplerate.
->
-> **Original project:** https://github.com/tuxu/python-samplerate
-> **This fork:** https://github.com/LedFx/python-samplerate-ledfx
-[![image](https://img.shields.io/pypi/v/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/l/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/wheel/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/pyversions/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![Documentation Status](https://readthedocs.org/projects/python-samplerate/badge/?version=latest)](http://python-samplerate.readthedocs.io/en/latest/?badge=latest)
+# samplerate-ledfx
 
-This is a wrapper around Erik de Castro Lopo's [libsamplerate](http://www.mega-nerd.com/libsamplerate/) (aka Secret Rabbit Code) for high-quality sample rate conversion.
+[![PyPI](https://img.shields.io/pypi/v/samplerate-ledfx.svg)](https://pypi.org/project/samplerate-ledfx/)
+[![Python versions](https://img.shields.io/pypi/pyversions/samplerate-ledfx.svg)](https://pypi.org/project/samplerate-ledfx/)
+[![License](https://img.shields.io/pypi/l/samplerate-ledfx.svg)](https://github.com/LedFx/python-samplerate-ledfx/blob/main/LICENSE.rst)
+[![CI](https://github.com/LedFx/python-samplerate-ledfx/actions/workflows/ci.yml/badge.svg)](https://github.com/LedFx/python-samplerate-ledfx/actions/workflows/ci.yml)
 
-It implements all three [APIs](http://www.mega-nerd.com/libsamplerate/api.html) available in [libsamplerate](http://www.mega-nerd.com/libsamplerate/):
+Python bindings for [libsamplerate](https://libsndfile.github.io/libsamplerate/)
+(Secret Rabbit Code), Erik de Castro Lopo's high-quality sample rate converter,
+built with [pybind11](https://github.com/pybind/pybind11) and NumPy.
 
--   **Simple API**: for resampling a large chunk of data with a single library call
--   **Full API**: for obtaining the resampled signal from successive chunks of data
--   **Callback API**: like Full API, but input samples are provided by a callback function
+This is the [LedFx](https://github.com/LedFx) team's maintained fork of
+[tuxu/python-samplerate](https://github.com/tuxu/python-samplerate). LedFx
+depends on it, and upstream releases rarely, so the fork provides:
 
-The [libsamplerate](http://www.mega-nerd.com/libsamplerate/) library is statically built together with the python bindings using [pybind11](https://github.com/pybind/pybind11/). This fork builds libsamplerate's `master` (its last release, 0.2.2, is from 2021) plus fixes from upstream pull requests that are not merged yet; see [MAINTAINING.md](MAINTAINING.md#libsamplerate). `samplerate.__libsamplerate_version__` reports the build.
+- Prebuilt wheels for CPython 3.11–3.15 on Linux (x86_64, aarch64), macOS
+  (Intel, Apple Silicon) and Windows (x64).
+- Optional GIL release during resampling, for multi-threaded use.
+- Fixes for crashes and memory errors in the bindings and in libsamplerate
+  itself (see [CHANGELOG.md](https://github.com/LedFx/python-samplerate-ledfx/blob/main/CHANGELOG.md)).
+
+All credit for python-samplerate goes to its original authors.
 
 ## Installation
 
-> \$ pip install samplerate-ledfx
+```sh
+pip install samplerate-ledfx
+```
 
-Binary wheels of [samplerate-ledfx](https://pypi.org/p/samplerate-ledfx) are available. A C++ 14 or above compiler is required to build the package.
+The module is imported as `samplerate`, the same name as upstream's
+[`samplerate`](https://pypi.org/project/samplerate/) package, so install one or
+the other: `pip uninstall samplerate` first if you are switching.
+
+Building from source (where no wheel fits) needs a C++14 compiler and network
+access: CMake fetches libsamplerate and pybind11 at build time.
 
 ## Usage
 
-``` python
+The three [libsamplerate APIs](https://libsndfile.github.io/libsamplerate/api.html)
+are all available:
+
+- **Simple**: `resample()` converts a whole signal in one call.
+- **Full**: `Resampler.process()` converts a stream chunk by chunk, and the
+  ratio can change between chunks.
+- **Callback**: `CallbackResampler.read()` pulls input from a function you
+  provide.
+
+```python
 import numpy as np
 import samplerate
 
 # Synthesize data
-fs = 1000.
+fs = 1000.0
 t = np.arange(fs * 2) / fs
 input_data = np.sin(2 * np.pi * 5 * t)
 
 # Simple API
 ratio = 1.5
-converter = 'sinc_best'  # or 'sinc_fastest', ...
+converter = "sinc_best"  # or "sinc_medium", "sinc_fastest", "zero_order_hold", "linear"
 output_data_simple = samplerate.resample(input_data, ratio, converter)
 
 # Full API
@@ -52,97 +66,107 @@ output_data_full = resampler.process(input_data, ratio, end_of_input=True)
 # The result is the same for both APIs.
 assert np.allclose(output_data_simple, output_data_full)
 
-# See `samplerate.CallbackResampler` for the Callback API, or
-# `examples/play_modulation.py` for an example.
 
-# Callback API Example
+# Callback API: the callback returns the next chunk of input, or None at the
+# end of the stream. It is called again after that, so keep returning None.
 def producer():
-    # Generate data in chunks
-    for i in range(10):
+    for _ in range(10):
         yield np.random.uniform(-1, 1, 1024).astype(np.float32)
-    yield None # Signal end of stream
+
 
 data_iter = producer()
-callback = lambda: next(data_iter)
-
-resampler = samplerate.CallbackResampler(callback, ratio, converter)
+resampler = samplerate.CallbackResampler(lambda: next(data_iter, None), ratio, converter)
 output_chunks = []
 while True:
-    # Read chunks of resampled data
-    chunk = resampler.read(512)
+    chunk = resampler.read(512)  # may return fewer frames than asked for
     if chunk.shape[0] == 0:
         break
     output_chunks.append(chunk)
 ```
 
-## Input data
+[`examples/play_modulation.py`](https://github.com/LedFx/python-samplerate-ledfx/blob/main/examples/play_modulation.py) uses the callback
+API to play a frequency-modulated tone. Type hints ship with the package.
 
+### Input data
+
+- Multi-channel data is a 2-D array of shape `(frames, channels)`; a single
+  channel can also be a 1-D array.
 - Data is converted to 32-bit float. Integer samples are cast, not scaled:
   divide 16-bit PCM by 32768 yourself to get the usual -1.0 to 1.0 range.
-- The ratio (output rate / input rate) must be between 1/256 and 256.
+- The ratio (output rate / input rate) must be between 1/256 and 256;
+  anything else raises `samplerate.ResamplingError`.
 - The sinc converters handle at most 128 channels per `Resampler` or
   `CallbackResampler`. `resample()` takes any number: it converts wider input
   in groups of channels.
 
-## Performance Tips
+## Performance tips
 
-To get the maximum performance from `samplerate`:
+1. **Pass `np.float32`.** libsamplerate works on 32-bit floats; `float64` (NumPy's
+   default) or integer input is copied and cast first.
+2. **Pass C-contiguous arrays.** Non-contiguous input, such as a column slice,
+   is copied too.
+3. **Tune the GIL threshold** if you process many small chunks from several
+   threads (see below).
 
-1.  **Use `np.float32`**: The underlying `libsamplerate` library operates on 32-bit floats. Passing `np.float64` (default numpy float) or integer arrays triggers an implicit copy and cast, which can be expensive.
-    ```python
-    # Fast (no copy)
-    data = np.zeros(1000, dtype=np.float32)
-    samplerate.resample(data, 1.5)
+```python
+data = np.zeros(1000, dtype=np.float32)  # no copy
+samplerate.resample(data, 1.5)
 
-    # Slower (implicit copy + cast)
-    data = np.zeros(1000, dtype=np.float64)
-    samplerate.resample(data, 1.5)
-    ```
-2.  **Use C-Contiguous Arrays**: Ensure your input arrays are C-contiguous (row-major). Non-contiguous arrays (e.g., column slices) will also trigger a copy.
-3.  **Adjust GIL Threshold**: If you are processing many small chunks in a multi-threaded application, the default "auto" GIL release threshold (1000 frames) might be too high or too low. You can tune it:
-    ```python
-    # Release GIL even for small chunks (e.g. > 100 frames)
-    samplerate.set_gil_release_threshold(100)
-    ```
+data = np.zeros(1000)  # float64: copied and cast first
+samplerate.resample(data, 1.5)
+```
 
-## Multi-threading and GIL Control
+## Multi-threading and the GIL
 
-All resampling methods support a `release_gil` parameter that controls Python's Global Interpreter Lock (GIL) during resampling operations. This is useful for optimizing performance in different scenarios:
+`resample()`, `Resampler.process()` and `CallbackResampler.read()` take a
+`release_gil` argument:
 
-``` python
-import samplerate
-
-# Default: "auto" mode - releases GIL only for large data (>= 1000 frames)
-# Balances single-threaded performance with multi-threading capability
-# The threshold is configurable: samplerate.set_gil_release_threshold(2000)
+```python
+# Default ("auto", or None): release the GIL only for inputs of at least
+# 1000 frames, where the ~1-5 µs release/re-acquire cost is negligible.
 output = samplerate.resample(input_data, ratio)
 
-# Force GIL release - best for multi-threaded applications
-# Allows other Python threads to run during resampling
+# Always release it: other Python threads run while this one resamples.
 output = samplerate.resample(input_data, ratio, release_gil=True)
 
-# Disable GIL release - best for single-threaded applications with small data
-# Avoids the ~1-5µs overhead of GIL release/acquire
+# Never release it: lowest overhead for single-threaded, small inputs.
 output = samplerate.resample(input_data, ratio, release_gil=False)
+
+# Change the "auto" threshold (in frames).
+samplerate.set_gil_release_threshold(100)
 ```
 
-The same parameter is available on `Resampler.process()` and `CallbackResampler.read()`:
+Separate `Resampler` and `CallbackResampler` objects can run in parallel
+threads. A single object holds stream state, so using it from two threads at
+once raises `RuntimeError` instead of corrupting that state. While the GIL is
+released the input array is read without it: don't modify it from another
+thread during the call.
 
-``` python
-resampler = samplerate.Resampler('sinc_best', channels=1)
-output = resampler.process(input_data, ratio, release_gil=True)
+`samplerate.get_build_info()` reports the versions, compiler and settings the
+module was built with, for bug reports.
+
+## Development
+
+```sh
+uv sync --group test --group dev         # builds the extension
+uv run pytest -m "not perf"              # what CI runs; drop -m for timing benchmarks
+uv run prek run --all-files              # lint: ruff, actionlint, zizmor, ...
 ```
 
-Thread safety: separate `Resampler` / `CallbackResampler` objects can run in parallel threads. A single object holds stream state, so using it from two threads at once raises `RuntimeError` rather than corrupting that state. While the GIL is released, the input array is read without it: don't modify it from another thread during the call.
+PR titles follow [Conventional Commits](https://www.conventionalcommits.org/);
+releases are cut by release-please. See [MAINTAINING.md](https://github.com/LedFx/python-samplerate-ledfx/blob/main/MAINTAINING.md) for
+releases, dependency updates, the libsamplerate patches and upstream syncs.
 
 ## See also
 
--   [scikits.samplerate](https://pypi.python.org/pypi/scikits.samplerate) implements only the Simple API and uses [Cython](http://cython.org/) for extern calls. The resample function of scikits.samplerate and this package share the same function signature for compatiblity.
--   [resampy](https://github.com/bmcfee/resampy): sample rate conversion in Python + Cython.
+- [scikits.samplerate](https://pypi.org/project/scikits.samplerate/) implements
+  only the Simple API, with Cython. Its `resample` function has the same
+  signature as this package's.
+- [resampy](https://github.com/bmcfee/resampy): sample rate conversion in
+  Python and Cython.
 
 ## License
 
-This project is licensed under the [MIT license](https://opensource.org/licenses/MIT).
-
-As of version 0.1.9,
-[libsamplerate](http://www.mega-nerd.com/libsamplerate/) is licensed under the [2-clause BSD license](https://opensource.org/licenses/BSD-2-Clause).
+This project is licensed under the [MIT license](https://github.com/LedFx/python-samplerate-ledfx/blob/main/LICENSE.rst).
+[libsamplerate](https://libsndfile.github.io/libsamplerate/) is licensed under
+the [2-clause BSD license](https://opensource.org/licenses/BSD-2-Clause).
