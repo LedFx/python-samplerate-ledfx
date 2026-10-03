@@ -10,12 +10,13 @@ Event Loop Testing:
 - Tests run with all available event loop implementations on the platform
 - Windows: Tests with default asyncio and winloop (if installed)
 - Unix/Linux/macOS: Tests with default asyncio and uvloop (if installed)
-- Use the event_loop fixture to access the current loop type being tested
+- Use the loop_type fixture to access the current loop type being tested
 """
 import asyncio
 import platform
 import sys
 import time
+import warnings
 import numpy as np
 import pytest
 
@@ -67,50 +68,36 @@ AVAILABLE_LOOP_TYPES = get_available_loop_types()
 
 
 @pytest.fixture(params=AVAILABLE_LOOP_TYPES)
-def event_loop_policy(request):
+def event_loop_policy(request, event_loop_policy):
     """
-    Pytest fixture that provides different event loop policies.
-    
-    This allows pytest-asyncio to use uvloop, winloop, or default asyncio
-    based on what's available on the platform.
+    Overrides pytest-asyncio's fixture of this name, which it creates the
+    test's event loop from: run each test on every available loop type.
+    "default" is pytest-asyncio's own policy (the parent fixture).
     """
-    loop_type = request.param
-    
-    if loop_type == "uvloop":
-        import uvloop
-        policy = uvloop.EventLoopPolicy()
-    elif loop_type == "winloop":
+    if request.param == "default":
+        return event_loop_policy
+    # The policy classes are deprecated from Python 3.14; pytest-asyncio
+    # still takes one.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        if request.param == "uvloop":
+            import uvloop
+
+            return uvloop.EventLoopPolicy()
         import winloop
-        policy = winloop.EventLoopPolicy()
-    else:
-        policy = asyncio.DefaultEventLoopPolicy()
-    
-    # Store loop type for test output
-    policy.loop_type_name = loop_type
-    
-    return policy
+
+        return winloop.EventLoopPolicy()
 
 
 @pytest.fixture
-def event_loop(event_loop_policy):
-    """
-    Override pytest-asyncio's event_loop fixture to use our custom policy.
-    """
-    asyncio.set_event_loop_policy(event_loop_policy)
-    loop = event_loop_policy.new_event_loop()
-    
-    # Store loop type name on the loop for access in tests
-    loop.loop_type_name = event_loop_policy.loop_type_name
-    
-    yield loop
-    
-    loop.close()
-    asyncio.set_event_loop_policy(None)
+def loop_type(request, event_loop_policy):
+    """Name of the event loop type the test runs on, for its output."""
+    return request.node.callspec.params["event_loop_policy"]
 
 
 async def resample_async(data, ratio, converter_type, executor=None):
     """Asynchronously resample data using an executor."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
         executor,
         samplerate.resample,
@@ -126,16 +113,15 @@ async def resampler_process_async(data, ratio, converter_type, channels, executo
         resampler = samplerate.Resampler(converter_type, channels)
         return resampler.process(data, ratio, end_of_input=True)
     
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(executor, _process)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("num_concurrent", [2, 4, 8])
 @pytest.mark.parametrize("converter_type", ["sinc_fastest", "sinc_medium", "sinc_best"])
-async def test_asyncio_threadpool_parallel(event_loop, num_concurrent, converter_type):
+async def test_asyncio_threadpool_parallel(loop_type, num_concurrent, converter_type):
     """Test async execution with ThreadPoolExecutor shows parallel speedup."""
-    loop_type = event_loop.loop_type_name
     
     # Skip uvloop tests on macOS due to known performance issues with run_in_executor
     if loop_type == "uvloop" and sys.platform == "darwin":
@@ -199,9 +185,8 @@ async def test_asyncio_threadpool_parallel(event_loop, num_concurrent, converter
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("converter_type", ["sinc_fastest"])
-async def test_asyncio_no_executor_blocks(event_loop, converter_type):
+async def test_asyncio_no_executor_blocks(loop_type, converter_type):
     """Test that running CPU-bound work without executor blocks the event loop."""
-    loop_type = event_loop.loop_type_name
     
     # Skip on ARM Mac where executor overhead can dominate for very fast operations
     if is_arm_mac():
@@ -255,9 +240,8 @@ async def test_asyncio_no_executor_blocks(event_loop, converter_type):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("num_concurrent", [2, 4])
-async def test_asyncio_processpool_comparison(event_loop, num_concurrent):
+async def test_asyncio_processpool_comparison(loop_type, num_concurrent):
     """Compare ThreadPoolExecutor vs ProcessPoolExecutor for CPU-bound work."""
-    loop_type = event_loop.loop_type_name
     
     # Note: ProcessPoolExecutor should be slower due to pickling overhead
     # for the large numpy arrays, even though it avoids GIL entirely
@@ -308,9 +292,8 @@ async def test_asyncio_processpool_comparison(event_loop, num_concurrent):
 
 
 @pytest.mark.asyncio
-async def test_asyncio_mixed_workload(event_loop):
+async def test_asyncio_mixed_workload(loop_type):
     """Test mixing I/O and CPU-bound operations in async context."""
-    loop_type = event_loop.loop_type_name
     
     fs = 44100
     duration = 1.0
