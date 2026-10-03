@@ -324,10 +324,18 @@ jobs:
 
   # Release: tag v<version> only (release-please.yml creates it). Each job only
   # downloads the tested artifacts and publishes them.
+  #
+  # !cancelled() plus explicit results: without a status function, `if:` implies
+  # success(), which fails when ANY upstream job was skipped, transitively.
+  # CI passed runs with always() over jobs the plan skips (on a tag, the quick
+  # Linux tests), so success() would skip the release even when CI passed.
   publish:
     name: Publish to PyPI
     needs: [plan, ci-passed]
-    if: needs.plan.outputs.release == 'true'
+    if: >-
+      !cancelled() &&
+      needs.plan.outputs.release == 'true' &&
+      needs.ci-passed.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
@@ -356,7 +364,10 @@ jobs:
   github-release:
     name: Publish GitHub release
     needs: [plan, publish]
-    if: needs.plan.outputs.release == 'true'
+    if: >-
+      !cancelled() &&
+      needs.plan.outputs.release == 'true' &&
+      needs.publish.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
