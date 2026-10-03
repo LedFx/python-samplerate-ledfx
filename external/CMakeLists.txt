@@ -19,11 +19,17 @@ FetchContent_MakeAvailable(pybind11)
 set(BUILD_TESTING OFF CACHE BOOL "Disable libsamplerate test build")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Tracks master: the newest release, 0.2.2, is from 2021. Since then master
+# has SSE2 lrint() on x86-64 (faster, same output) and CMake fixes, among them
+# a minimum version CMake 4 accepts. Renovate bumps the commit; move back to a
+# tag once a release includes these.
+set(LIBSAMPLERATE_COMMIT 0844c208f683527c08ea8a80acc13b398aa9c8bf) # master
 FetchContent_Declare(
   libsamplerate
   GIT_REPOSITORY https://github.com/libsndfile/libsamplerate
-  GIT_TAG c96f5e3de9c4488f4e6c97f59f5245f22fda22f7 # 0.2.2
+  GIT_TAG ${LIBSAMPLERATE_COMMIT}
 )
-set(LIBSAMPLERATE_VERSION 0.2.2 CACHE STRING PUBLIC)  # <-- update libsamplerate version here
+string(SUBSTRING "${LIBSAMPLERATE_COMMIT}" 0 7 _libsamplerate_short)
+set(LIBSAMPLERATE_VERSION "0.2.2+git.${_libsamplerate_short}" CACHE STRING "libsamplerate version" FORCE)
 
 FetchContent_MakeAvailable(libsamplerate)

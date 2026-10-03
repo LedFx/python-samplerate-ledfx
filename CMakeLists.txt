@@ -1,7 +1,6 @@
 # https://stackoverflow.com/questions/51907755/building-a-pybind11-module-with-cpp-and-cuda-sources-using-cmake
 
 cmake_minimum_required(VERSION 3.15)
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 project(python-samplerate)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -47,7 +46,7 @@ target_compile_definitions(python-samplerate
     PRIVATE CMAKE_VERSION="${CMAKE_VERSION}"
     PRIVATE TARGET_ARCH="${CMAKE_SYSTEM_PROCESSOR}"
     PRIVATE TARGET_OS="${CMAKE_SYSTEM_NAME}"
-    PUBLIC PYBIND11_VERSION_INFO="${PYBIND11_VERSION_INFO}" 
+    PUBLIC PYBIND11_VERSION_INFO="${PYBIND11_VERSION_INFO}"
     PRIVATE LTO_ENABLED=$<BOOL:$<TARGET_PROPERTY:python-samplerate,INTERPROCEDURAL_OPTIMIZATION>>
 )
 
