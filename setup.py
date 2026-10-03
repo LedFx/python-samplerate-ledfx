@@ -4,7 +4,8 @@
 # https://github.com/pybind/cmake_example
 
 import os
-from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -39,7 +40,7 @@ class CMakeBuild(build_ext):
         # Using this requires trailing slash for auto-detection & inclusion of
         # auxiliary "native" libs
 
-        debug = int(os.environ.get("DEBUG", 0)) if self.debug is None else self.debug
+        debug = int(os.environ.get("DEBUG", "0")) if self.debug is None else self.debug
         cfg = "Debug" if debug else "Release"
 
         # CMake lets you override the generator - we need to check this.
@@ -55,9 +56,15 @@ class CMakeBuild(build_ext):
         ]
         build_args = []
         # Adding CMake arguments set as environment variable
-        # (needed e.g. to build for ARM OSx on conda-forge)
+        # (needed e.g. to build for ARM OSx on conda-forge). Split like a
+        # shell, so a quoted value can hold spaces:
+        # CMAKE_ARGS='-DCMAKE_CXX_FLAGS="-O2 -g"' (tuxu/python-samplerate#20).
+        # Not on Windows, where POSIX quoting would eat path backslashes.
         if "CMAKE_ARGS" in os.environ:
-            cmake_args += [item for item in os.environ["CMAKE_ARGS"].split(" ") if item]
+            if os.name == "nt":
+                cmake_args += os.environ["CMAKE_ARGS"].split()
+            else:
+                cmake_args += shlex.split(os.environ["CMAKE_ARGS"])
 
         # In this example, we pass in the version to C++. You might not need to.
         cmake_args += [f"-DPACKAGE_VERSION_INFO={self.distribution.get_version()}"]
@@ -82,10 +89,10 @@ class CMakeBuild(build_ext):
 
         else:
             # Single config generators are handled "normally"
-            single_config = any(x in cmake_generator for x in {"NMake", "Ninja"})
+            single_config = any(x in cmake_generator for x in ("NMake", "Ninja"))
 
             # CMake allows an arch-in-generator style for backward compatibility
-            contains_arch = any(x in cmake_generator for x in {"ARM", "Win64"})
+            contains_arch = any(x in cmake_generator for x in ("ARM", "Win64"))
 
             # Specify the arch if using MSVC generator, but only if it doesn't
             # contain a backward-compatibility arch spec already in the
@@ -114,12 +121,12 @@ class CMakeBuild(build_ext):
 
         # Set CMAKE_BUILD_PARALLEL_LEVEL to control the parallel build level
         # across all generators.
-        if "CMAKE_BUILD_PARALLEL_LEVEL" not in os.environ:
-            # self.parallel is a Python 3 only way to set parallel jobs by hand
-            # using -j in the build_ext call, not supported by pip or PyPA-build.
-            if hasattr(self, "parallel") and self.parallel:
-                # CMake 3.12+ only.
-                build_args += [f"-j{self.parallel}"]
+        # self.parallel is a Python 3 only way to set parallel jobs by hand
+        # using -j in the build_ext call, not supported by pip or PyPA-build.
+        if "CMAKE_BUILD_PARALLEL_LEVEL" not in os.environ and getattr(
+            self, "parallel", None
+        ):
+            build_args += [f"-j{self.parallel}"]
 
         build_temp = Path(self.build_temp) / ext.name
         if not build_temp.exists():
@@ -130,6 +137,11 @@ class CMakeBuild(build_ext):
         )
         subprocess.run(
             ["cmake", "--build", ".", *build_args], cwd=build_temp, check=True
+        )
+
+        # Type stubs sit next to the extension module.
+        shutil.copyfile(
+            Path(__file__).parent / "src" / "samplerate.pyi", extdir / "samplerate.pyi"
         )
 
 

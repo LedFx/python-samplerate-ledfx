@@ -1,7 +1,13 @@
 include README.md
+include CHANGELOG.md
 include LICENSE.rst
 include src/*.cpp
+include src/*.pyi
 include CMakeLists.txt
 include external/CMakeLists.txt
+include external/apply_patches.cmake
+include external/patches/*.patch
 include uv.lock
 include examples/*.py
+graft tests
+global-exclude *.py[cod] __pycache__

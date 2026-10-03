@@ -34,6 +34,7 @@
 #include <atomic>
 #include <cmath>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <typeinfo>
@@ -82,6 +83,16 @@
 // bound. Resampler.process() therefore grows the buffer whenever libsamplerate
 // fills it, and this value only trades a little memory for fewer regrowths.
 constexpr size_t OUTPUT_HEADROOM_FRAMES = 1024;
+
+// libsamplerate's limits (SRC_MAX_RATIO and src_sinc.c's MAX_CHANNELS); its
+// public header does not export them.
+constexpr double MAX_RATIO = 256.0;
+constexpr int SINC_MAX_CHANNELS = 128;
+// Error codes from libsamplerate's common.h, also internal. src_strerror()
+// takes them, so their values are fixed.
+constexpr int SRC_ERR_MALLOC_FAILED = 1;
+constexpr int SRC_ERR_BAD_SRC_RATIO = 6;
+constexpr int SRC_ERR_BAD_CHANNEL_COUNT = 11;
 
 // Minimum number of input frames before releasing the GIL during resampling
 // when using automatic GIL management. Releasing and re-acquiring the GIL has
@@ -135,12 +146,56 @@ enum class ConverterType {
 
 class ResamplingException : public std::exception {
  public:
-  explicit ResamplingException(int err_num) : message{src_strerror(err_num)} {}
+  explicit ResamplingException(int err_num) : message{describe(err_num)} {}
+  explicit ResamplingException(std::string msg) : message{std::move(msg)} {}
   const char *what() const noexcept override { return message.c_str(); }
 
  private:
+  // src_strerror() returns NULL for codes it does not know.
+  static std::string describe(int err_num) {
+    const char *msg = src_strerror(err_num);
+    return msg ? msg : "libsamplerate error " + std::to_string(err_num);
+  }
   std::string message = "";
 };
+
+bool is_sinc(int converter_type) {
+  return converter_type == SRC_SINC_BEST_QUALITY ||
+         converter_type == SRC_SINC_MEDIUM_QUALITY ||
+         converter_type == SRC_SINC_FASTEST;
+}
+
+// libsamplerate checks the ratio only against [1/256, 256], which NaN passes,
+// and only once called: by then process() has sized its output buffer from
+// the ratio (an infinite or huge one asks for terabytes). Check it first.
+void check_ratio(double ratio) {
+  if (!(ratio >= 1.0 / MAX_RATIO && ratio <= MAX_RATIO))
+    throw ResamplingException(SRC_ERR_BAD_SRC_RATIO);
+}
+
+// src_new() reports too many channels for the sinc converters as "Channel
+// count must be >= 1."; say what is actually wrong.
+SRC_STATE *new_state(int converter_type, int channels,
+                     const std::function<SRC_STATE *(int *)> &create) {
+  // libsamplerate asserts channels > 0 (aborting Python in a debug build;
+  // libsamplerate#223), accepts 0 with NDEBUG, and reports negative counts as
+  // a failed malloc.
+  if (channels < 1) throw ResamplingException(SRC_ERR_BAD_CHANNEL_COUNT);
+  int err_num = 0;
+  SRC_STATE *state = create(&err_num);
+  if (state != nullptr) return state;
+  if (err_num == SRC_ERR_BAD_CHANNEL_COUNT && channels > SINC_MAX_CHANNELS &&
+      is_sinc(converter_type))
+    throw ResamplingException(
+        "The sinc converters support at most " +
+        std::to_string(SINC_MAX_CHANNELS) + " channels, got " +
+        std::to_string(channels) +
+        ". resample() splits wider input itself; for Resampler or "
+        "CallbackResampler, use one per group of at most " +
+        std::to_string(SINC_MAX_CHANNELS) + " channels.");
+  if (err_num == 0) err_num = SRC_ERR_MALLOC_FAILED;
+  throw ResamplingException(err_num);
+}
 
 int get_converter_type(const py::object &obj) {
   if (py::isinstance<py::str>(obj)) {
@@ -170,13 +225,11 @@ int get_converter_type(const py::object &obj) {
 }
 
 void error_handler(int errnum) {
-  if (errnum > 0 && errnum < 24) {
-    throw ResamplingException(errnum);
-  } else if (errnum != 0) {  // the zero case is excluded as it is not an error
-    // this will throw a segmentation fault if we call src_strerror here
-    // also, these should never happen
+  if (errnum == 0) return;  // not an error
+  // src_strerror() has no message (NULL) for codes libsamplerate never returns
+  if (src_strerror(errnum) == nullptr)
     throw std::runtime_error("libsamplerate raised an unknown error code");
-  }
+  throw ResamplingException(errnum);
 }
 
 // Resamplers release the GIL while libsamplerate runs, so two Python threads
@@ -213,9 +266,9 @@ class Resampler {
   Resampler(const py::object &converter_type, int channels)
       : _converter_type(get_converter_type(converter_type)),
         _channels(channels) {
-    int _err_num = 0;
-    _state = src_new(_converter_type, _channels, &_err_num);
-    error_handler(_err_num);
+    _state = new_state(_converter_type, _channels, [&](int *err) {
+      return src_new(_converter_type, _channels, err);
+    });
   }
 
   // copy constructor
@@ -257,6 +310,7 @@ class Resampler {
 
     if (channels != _channels || channels == 0)
       throw std::domain_error("Invalid number of channels in input data.");
+    check_ratio(sr_ratio);
 
     const auto in_frames = static_cast<size_t>(inbuf.shape[0]);
     const auto *in_ptr = static_cast<const float *>(inbuf.ptr);
@@ -318,6 +372,7 @@ class Resampler {
 
   void set_ratio(double new_ratio) {
     InUseGuard guard(_in_use);
+    check_ratio(new_ratio);
     error_handler(src_set_ratio(_state, new_ratio));
   }
 
@@ -356,12 +411,12 @@ class CallbackResampler {
 
  private:
   void _create() {
-    int _err_num = 0;
     // No callback data: src_clone() copies it, so a clone would call back into
     // the original. the_callback_func uses active_reader instead.
-    _state = src_callback_new(the_callback_func, _converter_type, (int)_channels,
-                              &_err_num, nullptr);
-    if (_state == nullptr) error_handler(_err_num);
+    _state = new_state(_converter_type, (int)_channels, [&](int *err) {
+      return src_callback_new(the_callback_func, _converter_type,
+                              (int)_channels, err, nullptr);
+    });
   }
 
   void _destroy() {
@@ -434,6 +489,8 @@ class CallbackResampler {
   py::array_t<float, py::array::c_style> read(
       size_t frames, const py::object &release_gil = py::none()) {
     InUseGuard guard(_in_use);
+    // ratio is writable from Python; libsamplerate would take a NaN
+    check_ratio(_ratio);
 
     // allocate output array
     std::vector<size_t> out_shape{frames, _channels};
@@ -500,6 +557,7 @@ class CallbackResampler {
 
   void set_starting_ratio(double new_ratio) {
     InUseGuard guard(_in_use);
+    check_ratio(new_ratio);
     error_handler(src_set_ratio(_state, new_ratio));
     _ratio = new_ratio;
   }
@@ -579,11 +637,53 @@ py::array_t<float, py::array::c_style> resample(
   if (channels == 0)
     throw std::domain_error("Invalid number of channels (0) in input data.");
 
+  const int converter = get_converter_type(converter_type);
+  check_ratio(sr_ratio);
+
   // src_simple() is src_new() + one src_process() with end_of_input +
   // src_delete(), but cannot continue when the output buffer is full.
   // Resampler.process() does the same and grows the buffer instead.
-  auto output = Resampler(converter_type, channels)
-                    .process(input, sr_ratio, /*end_of_input=*/true, release_gil);
+  py::array_t<float, py::array::c_style> output;
+  if (channels <= SINC_MAX_CHANNELS || !is_sinc(converter)) {
+    output = Resampler(py::int_(converter), channels)
+                 .process(input, sr_ratio, /*end_of_input=*/true, release_gil);
+  } else {
+    // The sinc converters take at most SINC_MAX_CHANNELS channels. Channels
+    // are independent, so convert them in groups. libsamplerate's output
+    // length depends on the channel count (libsamplerate#206: 333 frames for
+    // one channel, 334 for four), so every group gets the same width, the
+    // last one padded with silent channels, and so the same length.
+    const auto frames = static_cast<size_t>(inbuf.shape[0]);
+    const auto *in_ptr = static_cast<const float *>(inbuf.ptr);
+    const int groups = (channels + SINC_MAX_CHANNELS - 1) / SINC_MAX_CHANNELS;
+    const int width = (channels + groups - 1) / groups;
+    float *out_ptr = nullptr;
+    size_t out_frames = 0;
+    for (int first = 0; first < channels; first += width) {
+      const int used = std::min(width, channels - first);
+      np_array_f32 group({frames, static_cast<size_t>(width)});
+      float *g = group.mutable_data();
+      std::fill_n(g, frames * width, 0.0f);
+      for (size_t f = 0; f < frames; ++f)
+        std::copy_n(in_ptr + f * channels + first, used, g + f * width);
+
+      auto part = Resampler(py::int_(converter), width)
+                      .process(group, sr_ratio, true, release_gil);
+      const auto part_frames = static_cast<size_t>(part.shape(0));
+      if (first == 0) {
+        out_frames = part_frames;
+        output = py::array_t<float, py::array::c_style>(
+            {out_frames, static_cast<size_t>(channels)});
+        out_ptr = output.mutable_data();
+      } else if (part_frames != out_frames) {
+        throw std::runtime_error(
+            "channel groups resampled to different lengths");
+      }
+      const float *p = part.data();
+      for (size_t f = 0; f < out_frames; ++f)
+        std::copy_n(p + f * width, used, out_ptr + f * channels + first);
+    }
+  }
 
   if (verbose) {
     py::print("samplerate info:");

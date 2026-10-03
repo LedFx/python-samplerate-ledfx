@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 import samplerate
 
 
@@ -9,7 +10,7 @@ def test_resize():
     x = np.random.randn(167)
     # internally, the bindings will first prepare a buffer of size
     # ceil(167 * 0.9) = 151, which will be resized to 150
-    y = samplerate.resample(x, 0.9)
+    y = samplerate.resample(x, ratio)
     assert y.shape[0] == 150
 
 
@@ -31,7 +32,7 @@ def test_truncated_outputs_are_valid_views():
 
     for data in (x, x[:, None]):  # 1-D mono takes a separate code path
         chunks = iter([data, None])
-        with samplerate.CallbackResampler(lambda: next(chunks), 0.9, "linear") as cb:
+        with samplerate.CallbackResampler(chunks.__next__, 0.9, "linear") as cb:
             y = cb.read(1000)  # more than available -> truncated
         _assert_owns_or_views_base(y)
         assert y.shape[0] < 1000

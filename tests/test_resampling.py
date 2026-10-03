@@ -48,8 +48,7 @@ def make_sweep(T, fs, f_lo=0.0, f_hi=None, fade=None, ascending=False):
     elif f_hi > fs / 2:
         f_hi = fs / 2
 
-    if f_lo < 1.0:
-        f_lo = 1.0
+    f_lo = max(f_lo, 1.0)
 
     if f_lo > f_hi:
         raise ValueError("Error: need 0. <= f_lo < f_hi <= fs/2")
@@ -94,7 +93,7 @@ def test_quality_sine(sr_orig, sr_new, fil, rms):
     idx = slice(sr_new // 2, -sr_new // 2)
 
     err = np.mean(np.abs(y[idx] - y_pred[idx]))
-    assert err <= rms, "{:g} > {:g}".format(err, rms)
+    assert err <= rms, f"{err:g} > {rms:g}"
 
 
 @pytest.mark.parametrize("sr_orig,sr_new", [(44100, 22050), (22050, 44100)])
@@ -122,4 +121,44 @@ def test_quality_sweep(sr_orig, sr_new, fil, rms):
 
     err = np.mean(np.abs(y[idx] - y_pred[idx]))
 
-    assert err <= rms, "{:g} > {:g}".format(err, rms)
+    assert err <= rms, f"{err:g} > {rms:g}"
+
+
+@pytest.mark.parametrize("converter_type", ["sinc_fastest", "linear"])
+@pytest.mark.parametrize("num_channels", [128, 129, 200, 257, 300])
+@pytest.mark.parametrize("ratio", [1 / 3, 0.099, 0.37, 0.5, 2.5])
+def test_resample_many_channels(converter_type, num_channels, ratio):
+    # The sinc converters take at most 128 channels; resample() converts wider
+    # input in groups of channels (tuxu/python-samplerate#40). libsamplerate's
+    # output length can differ by a frame between channel counts
+    # (libsamplerate#206), so compare each channel with its own mono
+    # conversion over their common length: the samples are the same.
+    rng = np.random.default_rng(0)
+    data = rng.standard_normal((1000, num_channels)).astype(np.float32)
+    output = samplerate.resample(data, ratio, converter_type)
+    assert output.ndim == 2 and output.shape[1] == num_channels
+    for ch in range(num_channels):
+        mono = samplerate.resample(
+            np.ascontiguousarray(data[:, ch]), ratio, converter_type
+        )
+        assert abs(len(mono) - len(output)) <= 1
+        n = min(len(mono), len(output))
+        np.testing.assert_array_equal(output[:n, ch], mono[:n])
+
+
+@pytest.mark.parametrize("num_channels", [1, 2])
+def test_linear_single_first_frame_stays_in_bounds(num_channels):
+    # libsamplerate's linear converter read the frame *before* the input
+    # buffer when its first call got one frame (libsamplerate#234, patched in
+    # external/patches). Put a sentinel there: the input is a view one frame
+    # into a larger array, so the read lands on it instead of other memory.
+    backing = np.full((2, num_channels), 1e6, dtype=np.float32)
+    backing[1] = 0.5
+    frame = backing[1:]
+    if num_channels == 1:
+        frame = frame[:, 0]
+    assert not frame.flags.owndata  # a view: no copy hides the read
+
+    resampler = samplerate.Resampler("linear", num_channels)
+    output = resampler.process(frame, 1.5)
+    np.testing.assert_array_equal(output, np.full_like(output, 0.5))

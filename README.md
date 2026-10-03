@@ -3,15 +3,15 @@
 >
 > **Why this fork exists:**
 > - The original python-samplerate project is sporadically active
-> - We need Python 3.14 support with pre-built wheels on PyPI
+> - We need current Python support (3.11–3.15) with pre-built wheels on PyPI
 > - We require the latest fixes and improvements from the main branch of python-samplerate
 > - LedFx depends on python-samplerate and needs a reliable, up-to-date release
 >
 > All credit for python-samplerate goes to the original authors. This fork exists solely to provide maintained releases for projects that depend on python-samplerate.
 >
-> **Original project:** https://github.com/tuxu/python-samplerate  
+> **Original project:** https://github.com/tuxu/python-samplerate
 > **This fork:** https://github.com/LedFx/python-samplerate-ledfx
-[![image](https://img.shields.io/pypi/v/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/l/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate)[![image](https://img.shields.io/pypi/wheel/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/pyversions/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![Documentation Status](https://readthedocs.org/projects/python-samplerate/badge/?version=latest)](http://python-samplerate.readthedocs.io/en/latest/?badge=latest)
+[![image](https://img.shields.io/pypi/v/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/l/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/wheel/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/pyversions/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![Documentation Status](https://readthedocs.org/projects/python-samplerate/badge/?version=latest)](http://python-samplerate.readthedocs.io/en/latest/?badge=latest)
 
 This is a wrapper around Erik de Castro Lopo's [libsamplerate](http://www.mega-nerd.com/libsamplerate/) (aka Secret Rabbit Code) for high-quality sample rate conversion.
 
@@ -21,7 +21,7 @@ It implements all three [APIs](http://www.mega-nerd.com/libsamplerate/api.html) 
 -   **Full API**: for obtaining the resampled signal from successive chunks of data
 -   **Callback API**: like Full API, but input samples are provided by a callback function
 
-The [libsamplerate](http://www.mega-nerd.com/libsamplerate/) library is statically built together with the python bindings using [pybind11](https://github.com/pybind/pybind11/).
+The [libsamplerate](http://www.mega-nerd.com/libsamplerate/) library is statically built together with the python bindings using [pybind11](https://github.com/pybind/pybind11/). This fork builds libsamplerate's `master` (its last release, 0.2.2, is from 2021) plus fixes from upstream pull requests that are not merged yet; see [MAINTAINING.md](MAINTAINING.md#libsamplerate). `samplerate.__libsamplerate_version__` reports the build.
 
 ## Installation
 
@@ -69,11 +69,20 @@ resampler = samplerate.CallbackResampler(callback, ratio, converter)
 output_chunks = []
 while True:
     # Read chunks of resampled data
-    chunk = resampler.read(512) 
+    chunk = resampler.read(512)
     if chunk.shape[0] == 0:
         break
     output_chunks.append(chunk)
 ```
+
+## Input data
+
+- Data is converted to 32-bit float. Integer samples are cast, not scaled:
+  divide 16-bit PCM by 32768 yourself to get the usual -1.0 to 1.0 range.
+- The ratio (output rate / input rate) must be between 1/256 and 256.
+- The sinc converters handle at most 128 channels per `Resampler` or
+  `CallbackResampler`. `resample()` takes any number: it converts wider input
+  in groups of channels.
 
 ## Performance Tips
 
@@ -86,7 +95,7 @@ To get the maximum performance from `samplerate`:
     samplerate.resample(data, 1.5)
 
     # Slower (implicit copy + cast)
-    data = np.zeros(1000, dtype=np.float64) 
+    data = np.zeros(1000, dtype=np.float64)
     samplerate.resample(data, 1.5)
     ```
 2.  **Use C-Contiguous Arrays**: Ensure your input arrays are C-contiguous (row-major). Non-contiguous arrays (e.g., column slices) will also trigger a copy.

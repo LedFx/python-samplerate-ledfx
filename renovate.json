@@ -12,10 +12,23 @@
         "/^external/CMakeLists\\.txt$/"
       ],
       "matchStrings": [
-        "GIT_REPOSITORY https://github\\.com/(?<depName>[\\w.-]+/[\\w.-]+)\\s+GIT_TAG (?<currentDigest>[0-9a-f]{40}) # (?<currentValue>\\S+)[\\s\\S]*?set\\(\\w+_VERSION\\w* \"?\\S+?\"? CACHE"
+        "GIT_REPOSITORY https://github\\.com/(?<depName>[\\w.-]+/[\\w.-]+)\\s+GIT_TAG (?<currentDigest>[0-9a-f]{40}) # (?<currentValue>v?\\d\\S*)[\\s\\S]*?set\\(\\w+_VERSION\\w* \"?\\S+?\"? CACHE"
       ],
       "datasourceTemplate": "github-tags",
       "extractVersionTemplate": "^v?(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "libsamplerate tracks master by commit (external/CMakeLists.txt): its last release, 0.2.2, is from 2021.",
+      "managerFilePatterns": [
+        "/^external/CMakeLists\\.txt$/"
+      ],
+      "matchStrings": [
+        "set\\(LIBSAMPLERATE_COMMIT (?<currentDigest>[0-9a-f]{40})\\) # (?<currentValue>\\S+)"
+      ],
+      "depNameTemplate": "libsamplerate",
+      "packageNameTemplate": "https://github.com/libsndfile/libsamplerate",
+      "datasourceTemplate": "git-refs"
     },
     {
       "customType": "regex",
@@ -39,9 +52,10 @@
       "automerge": false
     },
     {
-      "description": "Upstream commits carry no release timestamp; the preset's release-age wait would hold this forever.",
+      "description": "Branch commits (git-refs) carry no release timestamp; the preset's release-age wait would hold these forever.",
       "matchDepNames": [
-        "upstream python-samplerate"
+        "upstream python-samplerate",
+        "libsamplerate"
       ],
       "minimumReleaseAge": null
     }

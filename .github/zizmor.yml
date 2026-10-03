@@ -1,0 +1,26 @@
+# zizmor configuration. The lint gate (.pre-commit-config.yaml) runs zizmor
+# with --min-severity high: findings below `high` are advisory.
+#
+# - dangerous-triggers/lint-notify.yml: the reviewed, safe shape of
+#   workflow_run. The default-branch version always runs, it never checks out
+#   or executes PR code, and PR-controlled values only reach `gh` as API
+#   arguments. See the comment block at the top of the workflow.
+# - dangerous-triggers/pr-title.yml: pull_request_target in the same safe
+#   shape, so the bot can comment on fork PRs: the default-branch workflow and
+#   script run, PR code is never checked out, and the title reaches the script
+#   only as an environment variable.
+# - secrets-outside-env: AUTOMATION_APP_* (org secrets) mint a short-lived
+#   ledfx-automation token. lint-notify.yml and pr-title.yml ask it for
+#   pull-requests: write only (comments); release-please.yml for contents,
+#   pull-requests and issues, to open the release PR and push the tag and
+#   draft release. Publishing stays behind the pypi environment in ci.yml.
+rules:
+  dangerous-triggers:
+    ignore:
+      - lint-notify.yml
+      - pr-title.yml
+  secrets-outside-env:
+    ignore:
+      - lint-notify.yml
+      - pr-title.yml
+      - release-please.yml
