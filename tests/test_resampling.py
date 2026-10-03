@@ -123,3 +123,22 @@ def test_quality_sweep(sr_orig, sr_new, fil, rms):
     err = np.mean(np.abs(y[idx] - y_pred[idx]))
 
     assert err <= rms, "{:g} > {:g}".format(err, rms)
+
+
+@pytest.mark.parametrize("converter_type", ["sinc_fastest", "linear"])
+@pytest.mark.parametrize("num_channels", [128, 129, 300])
+def test_resample_many_channels(converter_type, num_channels):
+    # The sinc converters take at most 128 channels; resample() converts wider
+    # input in groups of channels (tuxu/python-samplerate#40).
+    rng = np.random.default_rng(0)
+    data = rng.standard_normal((1000, num_channels)).astype(np.float32)
+    output = samplerate.resample(data, 0.5, converter_type)
+    expected = np.stack(
+        [
+            samplerate.resample(np.ascontiguousarray(data[:, ch]), 0.5, converter_type)
+            for ch in range(num_channels)
+        ],
+        axis=1,
+    )
+    assert output.shape == expected.shape
+    np.testing.assert_array_equal(output, expected)

@@ -121,3 +121,45 @@ def test_callback_resampler_callback_raises():
     cb_resampler = samplerate.CallbackResampler(callback, 0.5, "sinc_fastest", 1)
     with pytest.raises(KeyError, match="raised in callback"):
         cb_resampler.read(100)
+
+
+BAD_RATIOS = [0.0, -1.0, 1e-9, 1e9, float("inf"), float("nan")]
+
+
+@pytest.mark.parametrize("ratio", BAD_RATIOS)
+def test_resample_bad_ratio(ratio):
+    # Checked before the output buffer is sized from the ratio: 1e9 used to
+    # ask for terabytes (MemoryError), NaN for a negative size (ValueError).
+    data = np.zeros(1000, dtype=np.float32)
+    with pytest.raises(samplerate.ResamplingError):
+        samplerate.resample(data, ratio, "sinc_fastest")
+
+
+@pytest.mark.parametrize("ratio", BAD_RATIOS)
+def test_resampler_bad_ratio(ratio):
+    resampler = samplerate.Resampler("sinc_fastest", 1)
+    with pytest.raises(samplerate.ResamplingError):
+        resampler.process(np.zeros(1000, dtype=np.float32), ratio)
+    with pytest.raises(samplerate.ResamplingError):
+        resampler.set_ratio(ratio)
+
+
+@pytest.mark.parametrize("ratio", BAD_RATIOS)
+def test_callback_resampler_bad_ratio(ratio):
+    # libsamplerate accepts NaN and returns NaN samples
+    data = np.zeros(1000, dtype=np.float32)
+    cb_resampler = samplerate.CallbackResampler(lambda: data, ratio, "sinc_fastest")
+    with pytest.raises(samplerate.ResamplingError):
+        cb_resampler.read(100)
+    cb_resampler.ratio = 0.5
+    with pytest.raises(samplerate.ResamplingError):
+        cb_resampler.set_starting_ratio(ratio)
+
+
+@pytest.mark.parametrize("converter_type", ["sinc_best", "sinc_medium", "sinc_fastest"])
+def test_sinc_too_many_channels(converter_type):
+    # libsamplerate's own message for this is "Channel count must be >= 1."
+    with pytest.raises(samplerate.ResamplingError, match="at most 128 channels"):
+        samplerate.Resampler(converter_type, 129)
+    with pytest.raises(samplerate.ResamplingError, match="at most 128 channels"):
+        samplerate.CallbackResampler(lambda: None, 0.5, converter_type, 129)
