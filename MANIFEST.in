@@ -1,6 +1,7 @@
 include README.md
 include LICENSE.rst
 include src/*.cpp
+include src/*.pyi
 include CMakeLists.txt
 include external/CMakeLists.txt
 include uv.lock

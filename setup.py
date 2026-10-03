@@ -4,7 +4,8 @@
 # https://github.com/pybind/cmake_example
 
 import os
-from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -55,9 +56,15 @@ class CMakeBuild(build_ext):
         ]
         build_args = []
         # Adding CMake arguments set as environment variable
-        # (needed e.g. to build for ARM OSx on conda-forge)
+        # (needed e.g. to build for ARM OSx on conda-forge). Split like a
+        # shell, so a quoted value can hold spaces:
+        # CMAKE_ARGS='-DCMAKE_CXX_FLAGS="-O2 -g"' (tuxu/python-samplerate#20).
+        # Not on Windows, where POSIX quoting would eat path backslashes.
         if "CMAKE_ARGS" in os.environ:
-            cmake_args += [item for item in os.environ["CMAKE_ARGS"].split(" ") if item]
+            if os.name == "nt":
+                cmake_args += os.environ["CMAKE_ARGS"].split()
+            else:
+                cmake_args += shlex.split(os.environ["CMAKE_ARGS"])
 
         # In this example, we pass in the version to C++. You might not need to.
         cmake_args += [f"-DPACKAGE_VERSION_INFO={self.distribution.get_version()}"]
@@ -130,6 +137,11 @@ class CMakeBuild(build_ext):
         )
         subprocess.run(
             ["cmake", "--build", ".", *build_args], cwd=build_temp, check=True
+        )
+
+        # Type stubs sit next to the extension module.
+        shutil.copyfile(
+            Path(__file__).parent / "src" / "samplerate.pyi", extdir / "samplerate.pyi"
         )
 
 
