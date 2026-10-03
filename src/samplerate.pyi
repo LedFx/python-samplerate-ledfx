@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from types import ModuleType
-from typing import Callable, ClassVar, Optional, TypedDict, Union, type_check_only
+from typing import ClassVar, Self, TypeAlias, TypedDict, type_check_only
 
 import numpy as np
 import numpy.typing as npt
@@ -47,8 +48,8 @@ class ConverterType:
 
 class ResamplingError(RuntimeError): ...
 
-_Converter = Union[ConverterType, str, int]
-_ReleaseGil = Optional[Union[bool, str]]
+_Converter: TypeAlias = ConverterType | str | int
+_ReleaseGil: TypeAlias = bool | str | None
 _Input = npt.ArrayLike
 
 def set_gil_release_threshold(threshold: int) -> None: ...
@@ -91,7 +92,7 @@ class CallbackResampler:
     def channels(self) -> int: ...
     def __init__(
         self,
-        callback: Callable[[], Optional[_Input]],
+        callback: Callable[[], _Input | None],
         ratio: float,
         converter_type: _Converter = "sinc_best",
         channels: int = 1,
@@ -104,5 +105,5 @@ class CallbackResampler:
     def reset(self) -> None: ...
     def set_starting_ratio(self, new_ratio: float) -> None: ...
     def clone(self) -> CallbackResampler: ...
-    def __enter__(self) -> CallbackResampler: ...
+    def __enter__(self) -> Self: ...
     def __exit__(self, exc_type: object, exc: object, exc_tb: object) -> None: ...

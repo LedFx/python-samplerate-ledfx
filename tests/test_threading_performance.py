@@ -4,10 +4,12 @@ Test that the GIL is properly released during resampling operations.
 This allows multiple threads to run resampling in parallel, which is critical
 for performance in multi-threaded applications.
 """
+
 import platform
 import sys
 import threading
 import time
+
 import numpy as np
 import pytest
 
@@ -16,7 +18,7 @@ import samplerate
 
 def is_arm_mac():
     """Check if running on ARM-based macOS (Apple Silicon)."""
-    return sys.platform == 'darwin' and platform.machine() == 'arm64'
+    return sys.platform == "darwin" and platform.machine() == "arm64"
 
 
 def _resample_work(data, ratio, converter_type, results, index):
@@ -40,13 +42,14 @@ def _resampler_work(data, ratio, converter_type, channels, results, index):
 
 def _callback_resampler_work(data, ratio, converter_type, channels, results, index):
     """Worker function that performs callback resampling."""
+
     def producer():
         yield data
         while True:
             yield None
 
-    callback = lambda p=producer(): next(p)
-    
+    callback = producer().__next__
+
     start = time.perf_counter()
     resampler = samplerate.CallbackResampler(callback, ratio, converter_type, channels)
     output = resampler.read(int(ratio * len(data)))
@@ -65,34 +68,33 @@ def test_resample_gil_release_parallel(num_threads, converter_type):
     fs = 44100
     duration = 5.0  # seconds - increased from 0.5 to make computation time >> overhead
     ratio = 2.0
-    
+
     num_samples = int(fs * duration)
     data = np.random.randn(num_samples).astype(np.float32)
-    
+
     # Single-threaded baseline
     start = time.perf_counter()
     for _ in range(num_threads):
         samplerate.resample(data, ratio, converter_type)
     sequential_time = time.perf_counter() - start
-    
+
     # Multi-threaded test
     threads = []
     results = [0.0] * num_threads
     start = time.perf_counter()
-    
+
     for i in range(num_threads):
         thread = threading.Thread(
-            target=_resample_work,
-            args=(data, ratio, converter_type, results, i)
+            target=_resample_work, args=(data, ratio, converter_type, results, i)
         )
         threads.append(thread)
         thread.start()
-    
+
     for thread in threads:
         thread.join()
-    
+
     parallel_time = time.perf_counter() - start
-    
+
     # If GIL is properly released, parallel should be significantly faster
     # We expect at least 1.3x speedup for 2 threads, 1.5x for 4 threads
     # (accounting for overhead and non-perfect parallelization)
@@ -103,19 +105,25 @@ def test_resample_gil_release_parallel(num_threads, converter_type):
     else:
         expected_speedup = 1.2 if num_threads == 2 else 1.35
     speedup = sequential_time / parallel_time
-    
+
     print(f"\n{converter_type} with {num_threads} threads:")
     print(f"  Sequential: {sequential_time:.4f}s")
     print(f"  Parallel: {parallel_time:.4f}s")
     print(f"  Speedup: {speedup:.2f}x")
     print(f"  Platform: {'ARM Mac' if is_arm_mac() else platform.machine()}")
     print(f"  Individual thread times: {[f'{t:.4f}s' for t in results]}")
-    
+
     if speedup < expected_speedup:
-        print(f"  ⚠️  WARNING: Speedup {speedup:.2f}x is below expected {expected_speedup}x")
+        print(
+            f"  ⚠️  WARNING: Speedup {speedup:.2f}x is below expected {expected_speedup}x"
+        )
         print(f"      Expected: {expected_speedup}x, Got: {speedup:.2f}x")
-        print(f"      (sequential={sequential_time:.4f}s, parallel={parallel_time:.4f}s)")
-        print(f"      This may be due to CI load or platform-specific threading overhead.")
+        print(
+            f"      (sequential={sequential_time:.4f}s, parallel={parallel_time:.4f}s)"
+        )
+        print(
+            "      This may be due to CI load or platform-specific threading overhead."
+        )
     else:
         print(f"  ✓ Performance meets expectations ({expected_speedup}x)")
 
@@ -130,49 +138,52 @@ def test_resampler_process_gil_release_parallel(num_threads, converter_type):
     duration = 5.0  # increased to make computation time >> overhead
     ratio = 2.0
     channels = 1
-    
+
     num_samples = int(fs * duration)
     data = np.random.randn(num_samples).astype(np.float32)
-    
+
     # Single-threaded baseline
     start = time.perf_counter()
     for _ in range(num_threads):
         resampler = samplerate.Resampler(converter_type, channels)
         resampler.process(data, ratio, end_of_input=True)
     sequential_time = time.perf_counter() - start
-    
+
     # Multi-threaded test
     threads = []
     results = [0.0] * num_threads
     start = time.perf_counter()
-    
+
     for i in range(num_threads):
         thread = threading.Thread(
             target=_resampler_work,
-            args=(data, ratio, converter_type, channels, results, i)
+            args=(data, ratio, converter_type, channels, results, i),
         )
         threads.append(thread)
         thread.start()
-    
+
     for thread in threads:
         thread.join()
-    
+
     parallel_time = time.perf_counter() - start
-    
 
     expected_speedup = 1.1 if num_threads == 2 else 1.25
     speedup = sequential_time / parallel_time
-    
+
     print(f"\n{converter_type} Resampler.process() with {num_threads} threads:")
     print(f"  Sequential: {sequential_time:.4f}s")
     print(f"  Parallel: {parallel_time:.4f}s")
     print(f"  Speedup: {speedup:.2f}x")
     print(f"  Platform: {'ARM Mac' if is_arm_mac() else platform.machine()}")
     print(f"  Individual thread times: {[f'{t:.4f}s' for t in results]}")
-    
+
     if speedup < expected_speedup:
-        print(f"  ⚠️  WARNING: Speedup {speedup:.2f}x is below expected {expected_speedup}x")
-        print(f"      This may be due to CI load or platform-specific threading overhead.")
+        print(
+            f"  ⚠️  WARNING: Speedup {speedup:.2f}x is below expected {expected_speedup}x"
+        )
+        print(
+            "      This may be due to CI load or platform-specific threading overhead."
+        )
     else:
         print(f"  ✓ Performance meets expectations ({expected_speedup}x)")
 
@@ -188,40 +199,44 @@ def test_callback_resampler_gil_release_parallel(num_threads, converter_type):
     duration = 5.0  # increased to make computation time >> overhead
     ratio = 2.0
     channels = 1
-    
+
     num_samples = int(fs * duration)
     data = np.random.randn(num_samples).astype(np.float32)
-    
+
     # Single-threaded baseline
     start = time.perf_counter()
     for _ in range(num_threads):
+
         def producer():
             yield data
             while True:
                 yield None
-        callback = lambda p=producer(): next(p)
-        resampler = samplerate.CallbackResampler(callback, ratio, converter_type, channels)
+
+        callback = producer().__next__
+        resampler = samplerate.CallbackResampler(
+            callback, ratio, converter_type, channels
+        )
         resampler.read(int(ratio * len(data)))
     sequential_time = time.perf_counter() - start
-    
+
     # Multi-threaded test
     threads = []
     results = [0.0] * num_threads
     start = time.perf_counter()
-    
+
     for i in range(num_threads):
         thread = threading.Thread(
             target=_callback_resampler_work,
-            args=(data, ratio, converter_type, channels, results, i)
+            args=(data, ratio, converter_type, channels, results, i),
         )
         threads.append(thread)
         thread.start()
-    
+
     for thread in threads:
         thread.join()
-    
+
     parallel_time = time.perf_counter() - start
-    
+
     # Callback resampler has more GIL contention due to callback invocation,
     # so we expect lower speedup
     if is_arm_mac():
@@ -229,17 +244,21 @@ def test_callback_resampler_gil_release_parallel(num_threads, converter_type):
     else:
         expected_speedup = 1.2
     speedup = sequential_time / parallel_time
-    
+
     print(f"\n{converter_type} CallbackResampler with {num_threads} threads:")
     print(f"  Sequential: {sequential_time:.4f}s")
     print(f"  Parallel: {parallel_time:.4f}s")
     print(f"  Speedup: {speedup:.2f}x")
     print(f"  Platform: {'ARM Mac' if is_arm_mac() else platform.machine()}")
     print(f"  Individual thread times: {[f'{t:.4f}s' for t in results]}")
-    
+
     if speedup < expected_speedup:
-        print(f"  ⚠️  WARNING: Speedup {speedup:.2f}x is below expected {expected_speedup}x")
-        print(f"      This may be due to CI load or platform-specific threading overhead.")
+        print(
+            f"  ⚠️  WARNING: Speedup {speedup:.2f}x is below expected {expected_speedup}x"
+        )
+        print(
+            "      This may be due to CI load or platform-specific threading overhead."
+        )
     else:
         print(f"  ✓ Performance meets expectations ({expected_speedup}x)")
 
@@ -250,28 +269,28 @@ def test_gil_release_quality():
     fs = 44100
     duration = 0.1
     ratio = 1.5
-    
+
     num_samples = int(fs * duration)
     data = np.random.randn(num_samples).astype(np.float32)
-    
+
     # Reference single-threaded result
     reference = samplerate.resample(data, ratio, "sinc_best")
-    
+
     # Multi-threaded results
     results = [None, None]
     threads = []
-    
+
     def worker(data, ratio, results, index):
         results[index] = samplerate.resample(data, ratio, "sinc_best")
-    
+
     for i in range(2):
         thread = threading.Thread(target=worker, args=(data, ratio, results, i))
         threads.append(thread)
         thread.start()
-    
+
     for thread in threads:
         thread.join()
-    
+
     # Results should be identical
     assert np.allclose(reference, results[0])
     assert np.allclose(reference, results[1])
@@ -281,7 +300,7 @@ def test_gil_release_quality():
 @pytest.mark.perf
 def test_conditional_gil_release_small_data():
     """Test that small data sizes perform well without GIL release overhead.
-    
+
     This test verifies that the conditional GIL release optimization works:
     - For small data sizes (< 1000 frames), the GIL is kept to avoid overhead
     - Performance should be consistent for small data sizes
@@ -291,24 +310,24 @@ def test_conditional_gil_release_small_data():
     ratio = 2.0
     converter = "sinc_fastest"
     iterations = 100
-    
+
     for size in small_sizes:
         data = np.random.randn(size).astype(np.float32)
-        
+
         # Warmup
         for _ in range(10):
             samplerate.resample(data, ratio, converter)
-        
+
         # Time single-threaded execution
         start = time.perf_counter()
         for _ in range(iterations):
             samplerate.resample(data, ratio, converter)
         single_time = time.perf_counter() - start
-        
+
         per_call_us = (single_time / iterations) * 1e6
-        
+
         print(f"\n  Small data ({size} samples): {per_call_us:.2f} µs per call")
-        
+
         # For small data, per-call time should be reasonable
         # The exact time depends on hardware, but we just verify it completes
         assert per_call_us > 0
@@ -317,7 +336,7 @@ def test_conditional_gil_release_small_data():
 @pytest.mark.perf
 def test_conditional_gil_release_large_data_threading():
     """Test that large data sizes still benefit from GIL release for threading.
-    
+
     This verifies that the conditional GIL release still enables parallelism
     for data sizes above the threshold.
     """
@@ -326,51 +345,53 @@ def test_conditional_gil_release_large_data_threading():
     ratio = 2.0
     converter = "sinc_fastest"
     num_threads = 4
-    
+
     data = np.random.randn(size).astype(np.float32)
-    
+
     # Single-threaded baseline
     start = time.perf_counter()
     for _ in range(num_threads):
         samplerate.resample(data, ratio, converter)
     sequential_time = time.perf_counter() - start
-    
+
     # Multi-threaded
     threads = []
     results = [0.0] * num_threads
-    
+
     def worker(results, index):
         start = time.perf_counter()
         samplerate.resample(data, ratio, converter)
         results[index] = time.perf_counter() - start
-    
+
     start = time.perf_counter()
     for i in range(num_threads):
         t = threading.Thread(target=worker, args=(results, i))
         threads.append(t)
         t.start()
-    
+
     for t in threads:
         t.join()
-    
+
     parallel_time = time.perf_counter() - start
     speedup = sequential_time / parallel_time
-    
+
     print(f"\n  Large data ({size} samples) threading test:")
-    print(f"    Sequential: {sequential_time*1000:.2f} ms")
-    print(f"    Parallel: {parallel_time*1000:.2f} ms")
+    print(f"    Sequential: {sequential_time * 1000:.2f} ms")
+    print(f"    Parallel: {parallel_time * 1000:.2f} ms")
     print(f"    Speedup: {speedup:.2f}x")
-    
+
     # With GIL release for large data we expect a speedup, but these runs take
     # a few ms each, so shared CI runners can miss it; report like the others.
     if speedup <= 1.0:
         print(f"  ⚠️  WARNING: Expected speedup > 1.0x, got {speedup:.2f}x")
-        print(f"      This may be due to CI load or platform-specific threading overhead.")
+        print(
+            "      This may be due to CI load or platform-specific threading overhead."
+        )
 
 
 def test_release_gil_parameter():
     """Test that the release_gil parameter works correctly.
-    
+
     This tests that users can explicitly control GIL release behavior:
     - release_gil=None (default): Automatic based on data size
     - release_gil=True: Always release GIL
@@ -380,20 +401,28 @@ def test_release_gil_parameter():
     data = np.random.randn(100).astype(np.float32)
     ratio = 2.0
     converter = "sinc_fastest"
-    
+
     # Test resample() with different release_gil values
     result1 = samplerate.resample(data, ratio, converter)
-    result2 = samplerate.resample(data, ratio, converter, verbose=False, release_gil=None)
-    result3 = samplerate.resample(data, ratio, converter, verbose=False, release_gil=True)
-    result4 = samplerate.resample(data, ratio, converter, verbose=False, release_gil=False)
-    result5 = samplerate.resample(data, ratio, converter, verbose=False, release_gil="auto")
-    
+    result2 = samplerate.resample(
+        data, ratio, converter, verbose=False, release_gil=None
+    )
+    result3 = samplerate.resample(
+        data, ratio, converter, verbose=False, release_gil=True
+    )
+    result4 = samplerate.resample(
+        data, ratio, converter, verbose=False, release_gil=False
+    )
+    result5 = samplerate.resample(
+        data, ratio, converter, verbose=False, release_gil="auto"
+    )
+
     # All should produce the same result
     assert np.allclose(result1, result2)
     assert np.allclose(result1, result3)
     assert np.allclose(result1, result4)
     assert np.allclose(result1, result5)
-    
+
     # Test Resampler.process() with different release_gil values
     resampler = samplerate.Resampler(converter, 1)
     result6 = resampler.process(data, ratio, end_of_input=True)
@@ -401,26 +430,26 @@ def test_release_gil_parameter():
     result7 = resampler.process(data, ratio, end_of_input=True, release_gil=False)
     resampler.reset()
     result8 = resampler.process(data, ratio, end_of_input=True, release_gil=True)
-    
+
     assert np.allclose(result6, result7)
     assert np.allclose(result6, result8)
-    
+
     # Test CallbackResampler.read() with different release_gil values
     def producer():
         yield data
         while True:
             yield None
-    
-    callback1 = lambda p=producer(): next(p)
+
+    callback1 = producer().__next__
     cb_resampler1 = samplerate.CallbackResampler(callback1, ratio, converter, 1)
     result9 = cb_resampler1.read(int(ratio * len(data)))
-    
-    callback2 = lambda p=producer(): next(p)
+
+    callback2 = producer().__next__
     cb_resampler2 = samplerate.CallbackResampler(callback2, ratio, converter, 1)
     result10 = cb_resampler2.read(int(ratio * len(data)), release_gil=False)
-    
+
     assert len(result9) == len(result10)
-    
+
     print("\n  release_gil parameter test passed!")
     print("    - All release_gil options produce correct results")
     print("    - Users can control GIL release behavior explicitly")
@@ -429,80 +458,82 @@ def test_release_gil_parameter():
 def test_release_gil_parameter_invalid():
     """Test that invalid release_gil values raise appropriate errors."""
     data = np.random.randn(100).astype(np.float32)
-    
+
     # Invalid string value should raise a ValueError
     with pytest.raises(ValueError, match="Invalid release_gil"):
-        samplerate.resample(data, 2.0, "sinc_fastest", verbose=False, release_gil="invalid")
-    
+        samplerate.resample(
+            data, 2.0, "sinc_fastest", verbose=False, release_gil="invalid"
+        )
+
     print("\n  Invalid release_gil parameter test passed!")
 
 
 @pytest.mark.perf
 def test_gil_metrics_report():
     """Generate a detailed performance report for GIL release optimization."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("GIL Release Performance Report")
-    print("="*70)
-    
+    print("=" * 70)
+
     converters = ["sinc_fastest", "sinc_medium", "sinc_best"]
     thread_counts = [1, 2, 4]
-    
+
     fs = 44100
     duration = 5.0  # Long enough to overcome threading overhead
     ratio = 2.0
     num_samples = int(fs * duration)
     data = np.random.randn(num_samples).astype(np.float32)
-    
-    print(f"\nTest Configuration:")
+
+    print("\nTest Configuration:")
     print(f"  Sample rate: {fs} Hz")
     print(f"  Duration: {duration} seconds ({num_samples} samples)")
     print(f"  Conversion ratio: {ratio}x")
-    
+
     for converter in converters:
-        print(f"\n{'-'*70}")
+        print(f"\n{'-' * 70}")
         print(f"Converter: {converter}")
-        print(f"{'-'*70}")
-        
+        print(f"{'-' * 70}")
+
         single_thread_time = None
-        
+
         for num_threads in thread_counts:
             if num_threads == 1:
                 # Single thread baseline - just measure one execution
                 start = time.perf_counter()
                 samplerate.resample(data, ratio, converter)
                 single_thread_time = time.perf_counter() - start
-                
-                print(f"  1 thread (baseline):")
+
+                print("  1 thread (baseline):")
                 print(f"    Execution time: {single_thread_time:.4f}s")
             else:
                 # Multi-threaded: measure parallel execution
                 threads = []
                 results = [0.0] * num_threads
                 start = time.perf_counter()
-                
+
                 for i in range(num_threads):
                     thread = threading.Thread(
-                        target=_resample_work,
-                        args=(data, ratio, converter, results, i)
+                        target=_resample_work, args=(data, ratio, converter, results, i)
                     )
                     threads.append(thread)
                     thread.start()
-                
+
                 for thread in threads:
                     thread.join()
-                
+
                 parallel_time = time.perf_counter() - start
                 avg_thread_time = np.mean(results)
-                
+
                 # Calculate speedup comparing N parallel threads vs N sequential executions
                 sequential_time = single_thread_time * num_threads
                 speedup = sequential_time / parallel_time
                 efficiency = (speedup / num_threads) * 100
-                
+
                 print(f"  {num_threads} threads (parallel):")
                 print(f"    Parallel execution time: {parallel_time:.4f}s")
-                print(f"    Equivalent sequential time: {sequential_time:.4f}s ({num_threads} × {single_thread_time:.4f}s)")
+                print(
+                    f"    Equivalent sequential time: {sequential_time:.4f}s ({num_threads} × {single_thread_time:.4f}s)"
+                )
                 print(f"    Speedup: {speedup:.2f}x")
                 print(f"    Parallel efficiency: {efficiency:.1f}%")
                 print(f"    Avg thread time: {avg_thread_time:.4f}s")
-

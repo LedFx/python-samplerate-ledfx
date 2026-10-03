@@ -13,7 +13,7 @@ def test_callback_resampler_clone_outlives_original():
     clone = original.clone()
     del original
     gc.collect()
-    junk = [np.full(4096, -1.0, np.float32) for _ in range(200)]  # reuse freed memory
+    _junk = [np.full(4096, -1.0, np.float32) for _ in range(200)]  # reuse freed memory
     y = clone.read(1000)
     assert y.min() >= 0
 

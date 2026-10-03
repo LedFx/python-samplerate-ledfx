@@ -48,8 +48,7 @@ def make_sweep(T, fs, f_lo=0.0, f_hi=None, fade=None, ascending=False):
     elif f_hi > fs / 2:
         f_hi = fs / 2
 
-    if f_lo < 1.0:
-        f_lo = 1.0
+    f_lo = max(f_lo, 1.0)
 
     if f_lo > f_hi:
         raise ValueError("Error: need 0. <= f_lo < f_hi <= fs/2")
@@ -94,7 +93,7 @@ def test_quality_sine(sr_orig, sr_new, fil, rms):
     idx = slice(sr_new // 2, -sr_new // 2)
 
     err = np.mean(np.abs(y[idx] - y_pred[idx]))
-    assert err <= rms, "{:g} > {:g}".format(err, rms)
+    assert err <= rms, f"{err:g} > {rms:g}"
 
 
 @pytest.mark.parametrize("sr_orig,sr_new", [(44100, 22050), (22050, 44100)])
@@ -122,7 +121,7 @@ def test_quality_sweep(sr_orig, sr_new, fil, rms):
 
     err = np.mean(np.abs(y[idx] - y_pred[idx]))
 
-    assert err <= rms, "{:g} > {:g}".format(err, rms)
+    assert err <= rms, f"{err:g} > {rms:g}"
 
 
 @pytest.mark.parametrize("converter_type", ["sinc_fastest", "linear"])

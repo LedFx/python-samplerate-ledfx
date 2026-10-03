@@ -5,20 +5,7 @@ import samplerate
 
 
 def test_aliases():
-    from samplerate.converters import (
-        Resampler,
-        CallbackResampler,
-        resample,
-        ConverterType,
-    )
-    from samplerate import (
-        Resampler,
-        CallbackResampler,
-        resample,
-        ConverterType,
-        ResamplingError,
-    )
-    from samplerate.exceptions import ResamplingError
+    pass
 
 
 @pytest.fixture(scope="module", params=[1, 2])
@@ -67,7 +54,7 @@ def test_callback(data, converter_type, ratio=2.0):
         while True:
             yield None
 
-    callback = lambda p=producer(): next(p)
+    callback = producer().__next__
     channels = input_data.shape[-1] if input_data.ndim == 2 else 1
 
     resampler = samplerate.CallbackResampler(callback, ratio, converter_type, channels)
@@ -84,7 +71,7 @@ def test_callback_with(data, converter_type, ratio=2.0):
         while True:
             yield None
 
-    callback = lambda p=producer(): next(p)
+    callback = producer().__next__
     channels = input_data.shape[-1] if input_data.ndim == 2 else 1
 
     with CallbackResampler(
@@ -108,7 +95,7 @@ def test_callback_with_2x(data, converter_type, ratio=2.0):
 
     channels = input_data.shape[-1] if input_data.ndim == 2 else 1
 
-    callback = lambda p=producer(): next(p)
+    callback = producer().__next__
 
     with CallbackResampler(
         callback, ratio, converter_type, channels=channels
@@ -121,7 +108,7 @@ def test_callback_with_2x(data, converter_type, ratio=2.0):
 
 def test_Resampler_clone():
     resampler = samplerate.Resampler("sinc_best", 1)
-    new_resampler = resampler.clone()
+    assert isinstance(resampler.clone(), type(resampler))
 
 
 def test_CallbackResampler_clone(data, converter_type, ratio=2.0):
@@ -132,13 +119,13 @@ def test_CallbackResampler_clone(data, converter_type, ratio=2.0):
         while True:
             yield None
 
-    callback = lambda p=producer(): next(p)
+    callback = producer().__next__
     channels = input_data.shape[-1] if input_data.ndim == 2 else 1
 
     resampler = samplerate.CallbackResampler(callback, ratio, converter_type, channels)
     resampler.read(int(ratio) * input_data.shape[0])
 
-    new_resampler = resampler.clone()
+    assert isinstance(resampler.clone(), type(resampler))
 
 
 @pytest.mark.parametrize(

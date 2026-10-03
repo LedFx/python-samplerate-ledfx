@@ -9,7 +9,7 @@
 >
 > All credit for python-samplerate goes to the original authors. This fork exists solely to provide maintained releases for projects that depend on python-samplerate.
 >
-> **Original project:** https://github.com/tuxu/python-samplerate  
+> **Original project:** https://github.com/tuxu/python-samplerate
 > **This fork:** https://github.com/LedFx/python-samplerate-ledfx
 [![image](https://img.shields.io/pypi/v/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/l/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate)[![image](https://img.shields.io/pypi/wheel/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![image](https://img.shields.io/pypi/pyversions/samplerate-ledfx.svg)](https://pypi.python.org/pypi/samplerate-ledfx)[![Documentation Status](https://readthedocs.org/projects/python-samplerate/badge/?version=latest)](http://python-samplerate.readthedocs.io/en/latest/?badge=latest)
 
@@ -69,7 +69,7 @@ resampler = samplerate.CallbackResampler(callback, ratio, converter)
 output_chunks = []
 while True:
     # Read chunks of resampled data
-    chunk = resampler.read(512) 
+    chunk = resampler.read(512)
     if chunk.shape[0] == 0:
         break
     output_chunks.append(chunk)
@@ -86,7 +86,7 @@ To get the maximum performance from `samplerate`:
     samplerate.resample(data, 1.5)
 
     # Slower (implicit copy + cast)
-    data = np.zeros(1000, dtype=np.float64) 
+    data = np.zeros(1000, dtype=np.float64)
     samplerate.resample(data, 1.5)
     ```
 2.  **Use C-Contiguous Arrays**: Ensure your input arrays are C-contiguous (row-major). Non-contiguous arrays (e.g., column slices) will also trigger a copy.

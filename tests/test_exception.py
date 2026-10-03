@@ -74,7 +74,7 @@ def test_callback_resampler_ndim_too_big():
         while True:
             yield None
 
-    callback = lambda p=producer(): next(p)
+    callback = producer().__next__
 
     cb_resampler = samplerate.CallbackResampler(callback, 0.5, "sinc_fastest", 1)
     with pytest.raises(ValueError):
@@ -90,7 +90,7 @@ def test_callback_resampler_incorrect_channel_number():
         while True:
             yield None
 
-    callback = lambda p=producer(): next(p)
+    callback = producer().__next__
 
     cb_resampler = samplerate.CallbackResampler(callback, 0.5, "sinc_fastest", 1)
     with pytest.raises(ValueError):
@@ -106,7 +106,7 @@ def test_callback_resampler_zero_channels():
         while True:
             yield None
 
-    callback = lambda p=producer(): next(p)
+    callback = producer().__next__
 
     cb_resampler = samplerate.CallbackResampler(callback, 0.5, "sinc_fastest", 1)
     with pytest.raises(ValueError):
