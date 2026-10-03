@@ -163,3 +163,17 @@ def test_sinc_too_many_channels(converter_type):
         samplerate.Resampler(converter_type, 129)
     with pytest.raises(samplerate.ResamplingError, match="at most 128 channels"):
         samplerate.CallbackResampler(lambda: None, 0.5, converter_type, 129)
+
+
+@pytest.mark.parametrize("channels", [0, -1])
+@pytest.mark.parametrize("converter_type", ["sinc_best", "linear"])
+def test_resampler_bad_channel_count(converter_type, channels):
+    # libsamplerate asserts channels > 0 (libsamplerate#223): with NDEBUG it
+    # accepted 0, and it reported -1 as a failed malloc.
+    with pytest.raises(samplerate.ResamplingError, match="Channel count"):
+        samplerate.Resampler(converter_type, channels)
+
+
+def test_callback_resampler_zero_channel_count():
+    with pytest.raises(samplerate.ResamplingError, match="Channel count"):
+        samplerate.CallbackResampler(lambda: None, 0.5, "sinc_fastest", 0)

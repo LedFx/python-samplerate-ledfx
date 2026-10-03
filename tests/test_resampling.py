@@ -126,22 +126,25 @@ def test_quality_sweep(sr_orig, sr_new, fil, rms):
 
 
 @pytest.mark.parametrize("converter_type", ["sinc_fastest", "linear"])
-@pytest.mark.parametrize("num_channels", [128, 129, 300])
-def test_resample_many_channels(converter_type, num_channels):
+@pytest.mark.parametrize("num_channels", [128, 129, 200, 257, 300])
+@pytest.mark.parametrize("ratio", [1 / 3, 0.099, 0.37, 0.5, 2.5])
+def test_resample_many_channels(converter_type, num_channels, ratio):
     # The sinc converters take at most 128 channels; resample() converts wider
-    # input in groups of channels (tuxu/python-samplerate#40).
+    # input in groups of channels (tuxu/python-samplerate#40). libsamplerate's
+    # output length can differ by a frame between channel counts
+    # (libsamplerate#206), so compare each channel with its own mono
+    # conversion over their common length: the samples are the same.
     rng = np.random.default_rng(0)
     data = rng.standard_normal((1000, num_channels)).astype(np.float32)
-    output = samplerate.resample(data, 0.5, converter_type)
-    expected = np.stack(
-        [
-            samplerate.resample(np.ascontiguousarray(data[:, ch]), 0.5, converter_type)
-            for ch in range(num_channels)
-        ],
-        axis=1,
-    )
-    assert output.shape == expected.shape
-    np.testing.assert_array_equal(output, expected)
+    output = samplerate.resample(data, ratio, converter_type)
+    assert output.ndim == 2 and output.shape[1] == num_channels
+    for ch in range(num_channels):
+        mono = samplerate.resample(
+            np.ascontiguousarray(data[:, ch]), ratio, converter_type
+        )
+        assert abs(len(mono) - len(output)) <= 1
+        n = min(len(mono), len(output))
+        np.testing.assert_array_equal(output[:n, ch], mono[:n])
 
 
 @pytest.mark.parametrize("num_channels", [1, 2])

@@ -177,6 +177,10 @@ void check_ratio(double ratio) {
 // count must be >= 1."; say what is actually wrong.
 SRC_STATE *new_state(int converter_type, int channels,
                      const std::function<SRC_STATE *(int *)> &create) {
+  // libsamplerate asserts channels > 0 (aborting Python in a debug build;
+  // libsamplerate#223), accepts 0 with NDEBUG, and reports negative counts as
+  // a failed malloc.
+  if (channels < 1) throw ResamplingException(SRC_ERR_BAD_CHANNEL_COUNT);
   int err_num = 0;
   SRC_STATE *state = create(&err_num);
   if (state != nullptr) return state;
@@ -645,18 +649,23 @@ py::array_t<float, py::array::c_style> resample(
                  .process(input, sr_ratio, /*end_of_input=*/true, release_gil);
   } else {
     // The sinc converters take at most SINC_MAX_CHANNELS channels. Channels
-    // are independent, so convert them in groups; each group has the same
-    // length and ratio, so the same number of output frames.
+    // are independent, so convert them in groups. libsamplerate's output
+    // length depends on the channel count (libsamplerate#206: 333 frames for
+    // one channel, 334 for four), so every group gets the same width, the
+    // last one padded with silent channels, and so the same length.
     const auto frames = static_cast<size_t>(inbuf.shape[0]);
     const auto *in_ptr = static_cast<const float *>(inbuf.ptr);
+    const int groups = (channels + SINC_MAX_CHANNELS - 1) / SINC_MAX_CHANNELS;
+    const int width = (channels + groups - 1) / groups;
     float *out_ptr = nullptr;
     size_t out_frames = 0;
-    for (int first = 0; first < channels; first += SINC_MAX_CHANNELS) {
-      const int width = std::min(SINC_MAX_CHANNELS, channels - first);
+    for (int first = 0; first < channels; first += width) {
+      const int used = std::min(width, channels - first);
       np_array_f32 group({frames, static_cast<size_t>(width)});
       float *g = group.mutable_data();
+      std::fill_n(g, frames * width, 0.0f);
       for (size_t f = 0; f < frames; ++f)
-        std::copy_n(in_ptr + f * channels + first, width, g + f * width);
+        std::copy_n(in_ptr + f * channels + first, used, g + f * width);
 
       auto part = Resampler(py::int_(converter), width)
                       .process(group, sr_ratio, true, release_gil);
@@ -672,7 +681,7 @@ py::array_t<float, py::array::c_style> resample(
       }
       const float *p = part.data();
       for (size_t f = 0; f < out_frames; ++f)
-        std::copy_n(p + f * width, width, out_ptr + f * channels + first);
+        std::copy_n(p + f * width, used, out_ptr + f * channels + first);
     }
   }
 
