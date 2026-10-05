@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: >-
-      github.repository == 'LedFx/python-samplerate-ledfx' &&
+      github.repository == 'LedFx/samplerate-ledfx' &&
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'failure'
     steps:

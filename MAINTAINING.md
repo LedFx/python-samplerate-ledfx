@@ -151,3 +151,29 @@ The tests depend on nothing that needs a wheel per Python beyond NumPy, so a
 new CPython only waits for NumPy. uvloop and winloop were dropped: the asyncio
 perf tests measure GIL release in executor threads, which no event loop
 changes.
+
+## Shared publication verification
+
+Production publication remains in this repository's `ci.yml`, environment
+`pypi`, using the SHA-pinned [shared transaction](https://github.com/LedFx/release-ci)
+with the generated wheel plan and existing `pyproject.toml` metadata.
+The canonical repository and published project are `LedFx/samplerate-ledfx`
+and `samplerate-ledfx`. The generated coverage preserves CPython/platform
+support and compressed glibc aliases. Build/version/source/NumPy gates and diagnostic nightly jobs stay
+local. The publication guard retains `!cancelled()` and explicit successful
+dependencies because intentionally skipped transitive jobs must not suppress a
+valid release. Same-run `cibw-*` artifacts are used without rebuilding.
+
+One queued job verifies metadata, hashes and caller-bound provenance with a
+scoped App token, then publishes the existing draft last. Matching partial files
+can be retried only after checksum verification. Missing release-please drafts
+and conflicts now fail instead of fallback creation or `--clobber`; existing
+notes are preserved. Higher stable drafts/public releases veto latest, and an
+abandoned newer draft can delay it without blocking immutable version releases.
+Retain snapshots and attestation bundles; use the shared recovery guide and the
+original failed run rather than rebuilding published versions.
+
+Wheel support is maintained in `[tool.cibuildwheel]`; platform rows live in
+`[[tool.release-ci.targets]]` in `pyproject.toml`. Update the single `wheel-build`
+cibuildwheel dependency pin and `uv.lock` together. Planning and builds use that
+locked tool and configuration; publication rejects missing platform coverage.
