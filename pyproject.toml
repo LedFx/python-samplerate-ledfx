@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name="samplerate-ledfx"
 # Bumped by release-please (release-please-config.json); do not edit by hand.
-version = "0.4.0"
+version = "0.4.1"
 dynamic = ["readme"]
 description="Monolithic python wrapper for libsamplerate based on pybind11 and NumPy"
 authors=[
