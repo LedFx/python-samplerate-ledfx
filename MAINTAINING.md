@@ -151,3 +151,24 @@ The tests depend on nothing that needs a wheel per Python beyond NumPy, so a
 new CPython only waits for NumPy. uvloop and winloop were dropped: the asyncio
 perf tests measure GIL release in executor threads, which no event loop
 changes.
+
+## Shared publication verification
+
+Production publication remains in this repository's `ci.yml`, environment
+`pypi`, using the SHA-pinned [shared transaction](https://github.com/LedFx/release-ci)
+and `.github/release-policy.json`. The published project is `samplerate-ledfx`;
+it is not the repository's `python-samplerate-ledfx` name. The exact 25-wheel
+plus sdist policy preserves the existing CPython/platform matrix and compressed
+glibc aliases. Build/version/source/NumPy gates and diagnostic nightly jobs stay
+local. The publication guard retains `!cancelled()` and explicit successful
+dependencies because intentionally skipped transitive jobs must not suppress a
+valid release. Same-run `cibw-*` artifacts are used without rebuilding.
+
+One queued job verifies metadata, hashes and caller-bound provenance with a
+scoped App token, then publishes the existing draft last. Matching partial files
+can be retried only after checksum verification. Missing release-please drafts
+and conflicts now fail instead of fallback creation or `--clobber`; existing
+notes are preserved. Higher stable drafts/public releases veto latest, and an
+abandoned newer draft can delay it without blocking immutable version releases.
+Retain snapshots and attestation bundles; use the shared recovery guide and the
+original failed run rather than rebuilding published versions.
