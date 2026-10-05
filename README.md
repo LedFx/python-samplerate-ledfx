@@ -2,8 +2,8 @@
 
 [![PyPI](https://img.shields.io/pypi/v/samplerate-ledfx.svg)](https://pypi.org/project/samplerate-ledfx/)
 [![Python versions](https://img.shields.io/pypi/pyversions/samplerate-ledfx.svg)](https://pypi.org/project/samplerate-ledfx/)
-[![License](https://img.shields.io/pypi/l/samplerate-ledfx.svg)](https://github.com/LedFx/python-samplerate-ledfx/blob/main/LICENSE.rst)
-[![CI](https://github.com/LedFx/python-samplerate-ledfx/actions/workflows/ci.yml/badge.svg)](https://github.com/LedFx/python-samplerate-ledfx/actions/workflows/ci.yml)
+[![License](https://img.shields.io/pypi/l/samplerate-ledfx.svg)](https://github.com/LedFx/samplerate-ledfx/blob/main/LICENSE.rst)
+[![CI](https://github.com/LedFx/samplerate-ledfx/actions/workflows/ci.yml/badge.svg)](https://github.com/LedFx/samplerate-ledfx/actions/workflows/ci.yml)
 
 Python bindings for [libsamplerate](https://libsndfile.github.io/libsamplerate/)
 (Secret Rabbit Code), Erik de Castro Lopo's high-quality sample rate converter,
@@ -17,7 +17,7 @@ depends on it, and upstream releases rarely, so the fork provides:
   (Intel, Apple Silicon) and Windows (x64).
 - Optional GIL release during resampling, for multi-threaded use.
 - Fixes for crashes and memory errors in the bindings and in libsamplerate
-  itself (see [CHANGELOG.md](https://github.com/LedFx/python-samplerate-ledfx/blob/main/CHANGELOG.md)).
+  itself (see [CHANGELOG.md](https://github.com/LedFx/samplerate-ledfx/blob/main/CHANGELOG.md)).
 
 All credit for python-samplerate goes to its original authors.
 
@@ -84,7 +84,7 @@ while True:
     output_chunks.append(chunk)
 ```
 
-[`examples/play_modulation.py`](https://github.com/LedFx/python-samplerate-ledfx/blob/main/examples/play_modulation.py) uses the callback
+[`examples/play_modulation.py`](https://github.com/LedFx/samplerate-ledfx/blob/main/examples/play_modulation.py) uses the callback
 API to play a frequency-modulated tone. Type hints ship with the package.
 
 ### Input data
@@ -154,7 +154,7 @@ uv run prek run --all-files              # lint: ruff, actionlint, zizmor, ...
 ```
 
 PR titles follow [Conventional Commits](https://www.conventionalcommits.org/);
-releases are cut by release-please. See [MAINTAINING.md](https://github.com/LedFx/python-samplerate-ledfx/blob/main/MAINTAINING.md) for
+releases are cut by release-please. See [MAINTAINING.md](https://github.com/LedFx/samplerate-ledfx/blob/main/MAINTAINING.md) for
 releases, dependency updates, the libsamplerate patches and upstream syncs.
 
 ## See also
@@ -168,6 +168,6 @@ releases, dependency updates, the libsamplerate patches and upstream syncs.
 
 ## License
 
-This project is licensed under the [MIT license](https://github.com/LedFx/python-samplerate-ledfx/blob/main/LICENSE.rst).
+This project is licensed under the [MIT license](https://github.com/LedFx/samplerate-ledfx/blob/main/LICENSE.rst).
 [libsamplerate](https://libsndfile.github.io/libsamplerate/) is licensed under
 the [2-clause BSD license](https://opensource.org/licenses/BSD-2-Clause).
