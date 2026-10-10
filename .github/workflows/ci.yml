@@ -77,8 +77,9 @@ jobs:
               ;;
             *) exit 0 ;; # schedule and manual runs always build
           esac
+          export SCOPE_BASE="$base"
           scope=$(python3 - <<'PY'
-          import re, subprocess, sys
+          import os, re, subprocess
 
           def git(*args: str) -> str:
               result = subprocess.run(
@@ -86,7 +87,7 @@ jobs:
               )
               return result.stdout if result.returncode == 0 else ""
 
-          files = git("diff", "--name-only", base, "HEAD").split()
+          files = git("diff", "--name-only", os.environ["SCOPE_BASE"], "HEAD").split()
           if not files:
               print("false")  # empty or unreadable diff: build everything
               raise SystemExit
@@ -98,7 +99,7 @@ jobs:
               raise SystemExit
           anchors = ('name="samplerate-ledfx"', "[package]", "[project]")
           for name in [f for f in files if f in manifests]:
-              patch = git("diff", "--unified=0", base, "HEAD", "--", name)
+              patch = git("diff", "--unified=0", os.environ["SCOPE_BASE"], "HEAD", "--", name)
               if not patch:
                   print("false")
                   raise SystemExit
