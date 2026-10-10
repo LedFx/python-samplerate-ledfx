@@ -45,21 +45,28 @@ jobs:
       build: ${{ steps.plan.outputs.build }} # every wheel and the sdist
       version: ${{ steps.plan.outputs.version }}
       release: ${{ steps.plan.outputs.release }}
+      version_only: ${{ steps.version_scope.outputs.version-only }}
       matrix: ${{ steps.wheels.outputs.matrix }}
       wheel-plan: ${{ steps.wheels.outputs.wheel-plan }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: |
-            pyproject.toml
-            uv.lock
-          sparse-checkout-cone-mode: false
+          # version-scope diffs PRs against origin/main: merge refs carry no
+          # parents without full history.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false
       - id: wheels
         uses: LedFx/release-ci/actions/plan@442e00705d4e5edd589021851e756761363f9d84 # v0.3.1
+      - id: version_scope
+        uses: LedFx/release-ci/actions/version-scope@12ea4ced7288cb6b0f3a8aafbac3e825969c17ca # v0.4.2
+        with:
+          package-name: samplerate-ledfx
+          versioned-manifests: |
+            pyproject.toml
+            uv.lock
       - id: plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -144,7 +151,7 @@ jobs:
   build_wheels:
     name: Build wheels on ${{ matrix.runner }}
     needs: [plan, lint]
-    if: needs.plan.outputs.build == 'true'
+    if: needs.plan.outputs.build == 'true' && needs.plan.outputs.version_only != 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
@@ -178,7 +185,7 @@ jobs:
   build_sdist:
     name: Build and test source distribution
     needs: [plan, lint]
-    if: needs.plan.outputs.build == 'true'
+    if: needs.plan.outputs.build == 'true' && needs.plan.outputs.version_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
