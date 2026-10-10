@@ -45,7 +45,7 @@ jobs:
       build: ${{ steps.plan.outputs.build }} # every wheel and the sdist
       version: ${{ steps.plan.outputs.version }}
       release: ${{ steps.plan.outputs.release }}
-      version_only: ${{ steps.version_scope.outputs.version_only }}
+      version_only: ${{ steps.version_scope.outputs.version-only }}
       matrix: ${{ steps.wheels.outputs.matrix }}
       wheel-plan: ${{ steps.wheels.outputs.wheel-plan }}
     steps:
@@ -60,67 +60,13 @@ jobs:
           enable-cache: false
       - id: wheels
         uses: LedFx/release-ci/actions/plan@442e00705d4e5edd589021851e756761363f9d84 # v0.3.1
-      # A release-please PR (changelog, manifest, package version lines in
-      # pyproject.toml/uv.lock) cannot alter built artifacts: the full wheel
-      # matrix is redundant there, and again on the merge to main. Any other
-      # change set — renovate dependency or lock bumps included — runs it.
       - id: version_scope
-        env:
-          EVENT: ${{ github.event_name }}
-          REF: ${{ github.ref }}
-        run: |
-          case "$EVENT" in
-            pull_request) base="origin/main...HEAD" ;;
-            push)
-              if [[ "$REF" == refs/tags/* ]]; then exit 0; fi
-              base="HEAD^"
-              ;;
-            *) exit 0 ;; # schedule and manual runs always build
-          esac
-          export SCOPE_BASE="$base"
-          scope=$(python3 - <<'PY'
-          import os, re, subprocess
-
-          def git(*args: str) -> str:
-              result = subprocess.run(
-                  ["git", *args], capture_output=True, text=True, timeout=30
-              )
-              return result.stdout if result.returncode == 0 else ""
-
-          files = git("diff", "--name-only", os.environ["SCOPE_BASE"], "HEAD").split()
-          if not files:
-              print("false")  # empty or unreadable diff: build everything
-              raise SystemExit
-          prose = {"CHANGELOG.md", "CHANGELOG.rst", ".release-please-manifest.json"}
-          manifests = {"pyproject.toml", "uv.lock"}
-          rest = set(files) - manifests
-          if rest and not rest <= prose:
-              print("false")
-              raise SystemExit
-          anchors = ('name="samplerate-ledfx"', "[package]", "[project]")
-          for name in [f for f in files if f in manifests]:
-              patch = git("diff", "--unified=0", os.environ["SCOPE_BASE"], "HEAD", "--", name)
-              if not patch:
-                  print("false")
-                  raise SystemExit
-              for hunk in re.split(r"^@@", patch, flags=re.MULTILINE)[1:]:
-                  lines = hunk.splitlines()
-                  parts = lines[0].split(maxsplit=3)
-                  anchor = parts[3].lstrip() if len(parts) > 3 else ""
-                  changed = [
-                      line[1:].lstrip()
-                      for line in lines[1:]
-                      if line[:1] in {"+", "-"}
-                  ]
-                  ok = changed and all(c.startswith("version") for c in changed)
-                  ok = ok and anchor.replace(" ", "").startswith(anchors)
-                  if not ok:
-                      print("false")
-                      raise SystemExit
-          print("true")
-          PY
-          )
-          echo "version_only=$scope" >> "$GITHUB_OUTPUT"
+        uses: LedFx/release-ci/actions/version-scope@442e00705d4e5edd589021851e756761363f9d84 # v0.3.1
+        with:
+          package-name: samplerate-ledfx
+          versioned-manifests: |
+            pyproject.toml
+            uv.lock
       - id: plan
         env:
           GH_TOKEN: ${{ github.token }}
